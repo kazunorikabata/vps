@@ -13,6 +13,7 @@ from unittest import mock
 
 _config_dir = tempfile.TemporaryDirectory()
 os.environ["UPLOAD_CONFIG_DIR"] = _config_dir.name
+os.environ["UPLOAD_DATA_DIR"] = _config_dir.name
 
 import server  # noqa: E402
 
@@ -32,6 +33,7 @@ class ServerTest(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.httpd.shutdown()
+        cls.httpd.server_close()
 
     def setUp(self):
         server._hits.clear()
@@ -168,47 +170,112 @@ class LooksLikeTest(unittest.TestCase):
         self.assertFalse(server.looks_like(".exe", b"MZ"))
 
 
-class ClientsAdminTest(unittest.TestCase):
+class StaffTest(unittest.TestCase):
+    """顧問先の対応表と、事務所内ページ用の API"""
+
     def setUp(self):
-        import clients_admin
-        self.admin = clients_admin
         self.dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.dir.cleanup)
         for name, path in (("CLIENTS_FILE", "clients.json"), ("ROOT_FILE", "root-folder.json")):
-            p = mock.patch.object(clients_admin, name, os.path.join(self.dir.name, path))
+            p = mock.patch.object(server, name, os.path.join(self.dir.name, path))
             p.start()
             self.addCleanup(p.stop)
         self.create_folder = mock.Mock(side_effect=["rootFolder", "folderC001", "folderC002"])
         p = mock.patch.object(server, "create_folder", self.create_folder)
         p.start()
         self.addCleanup(p.stop)
+        self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.StaffHandler)
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+        self.addCleanup(self.httpd.server_close)
+        self.addCleanup(self.httpd.shutdown)
 
-    def run_admin(self, *args):
-        with mock.patch("sys.stdout"):
-            self.admin.main(list(args))
+    def post(self, path, body, origin=ORIGIN):
+        conn = http.client.HTTPConnection("127.0.0.1", self.httpd.server_address[1])
+        headers = {"Content-Type": "application/json", "X-Staff-User": "staff1"}
+        if origin:
+            headers["Origin"] = origin
+        conn.request("POST", path, json.dumps(body), headers)
+        res = conn.getresponse()
+        data = json.loads(res.read())
+        conn.close()
+        return res.status, data
+
+    def clients(self):
+        return server.load_json(server.CLIENTS_FILE)
 
     def test_add_creates_root_once(self):
-        self.run_admin("add", "C001")
-        self.run_admin("add", "C002")
+        with self.assertLogs("upload", "INFO"):
+            self.assertEqual(self.post("/clients/add", {"code": "C001"})[0], 200)
+            self.assertEqual(self.post("/clients/add", {"code": "C002"})[0], 200)
         self.assertEqual(self.create_folder.call_args_list, [
             mock.call("顧問先資料"),
             mock.call("C001", "rootFolder"),
             mock.call("C002", "rootFolder"),
         ])
-        clients = self.admin.load(self.admin.CLIENTS_FILE)
+        clients = self.clients()
         self.assertEqual(sorted(c["folder_id"] for c in clients.values()), ["folderC001", "folderC002"])
-        for token in clients:
+        for token, c in clients.items():
             self.assertRegex(token, server.TOKEN_RE)
-        self.assertEqual(os.stat(self.admin.CLIENTS_FILE).st_mode & 0o777, 0o640)
+            self.assertRegex(c["created"], r"^\d{4}-\d{2}-\d{2}$")
+        self.assertEqual(os.stat(server.CLIENTS_FILE).st_mode & 0o777, 0o600)
 
-    def test_duplicate_and_remove(self):
-        self.run_admin("add", "C001")
-        with self.assertRaises(SystemExit):
-            self.run_admin("add", "C001")
-        self.run_admin("remove", "C001")
-        self.assertEqual(self.admin.load(self.admin.CLIENTS_FILE), {})
-        with self.assertRaises(SystemExit):
-            self.run_admin("remove", "C001")
+    def test_add_response_and_list(self):
+        status, data = self.post("/clients/add", {"code": "C001"})
+        token = next(iter(self.clients()))
+        self.assertEqual(data["client"]["uploadUrl"], server.UPLOAD_BASE_URL + token)
+        self.assertEqual(data["client"]["folderUrl"], "https://drive.google.com/drive/folders/folderC001")
+        status, data = self.post("/clients/list", {})
+        self.assertEqual([c["code"] for c in data["clients"]], ["C001"])
+
+    def test_add_duplicate_and_bad_code(self):
+        self.post("/clients/add", {"code": "C001"})
+        self.assertEqual(self.post("/clients/add", {"code": "C001"})[0], 409)
+        for code in ("", "C 001", "顧問先", "../x", "x" * 21, 1):
+            self.assertEqual(self.post("/clients/add", {"code": code})[0], 400, code)
+
+    def test_remove(self):
+        self.post("/clients/add", {"code": "C001"})
+        self.assertEqual(self.post("/clients/remove", {"code": "C001"}), (200, {"ok": True}))
+        self.assertEqual(self.clients(), {})
+        self.assertEqual(self.post("/clients/remove", {"code": "C001"})[0], 404)
+
+    def test_reissue_keeps_folder(self):
+        self.post("/clients/add", {"code": "C001"})
+        old_token, old = next(iter(self.clients().items()))
+        status, data = self.post("/clients/reissue", {"code": "C001"})
+        self.assertEqual(status, 200)
+        (new_token, new), = self.clients().items()
+        self.assertNotEqual(new_token, old_token)
+        self.assertEqual(new, old)
+        self.assertEqual(data["client"]["uploadUrl"], server.UPLOAD_BASE_URL + new_token)
+        with self.assertRaises(server.UploadError):
+            server.find_client(old_token)
+
+    def test_qr(self):
+        self.post("/clients/add", {"code": "C001"})
+        status, data = self.post("/clients/qr", {"code": "C001"})
+        self.assertEqual(status, 200)
+        self.assertTrue(data["dataUrl"].startswith("data:image/png;base64,"))
+        self.assertEqual(self.post("/clients/qr", {"code": "C999"})[0], 404)
+
+    def test_wrong_origin(self):
+        self.assertEqual(self.post("/clients/add", {"code": "C001"}, origin="https://evil.example")[0], 403)
+        self.create_folder.assert_not_called()
+
+    def test_upload_routes_not_on_staff_port_and_vice_versa(self):
+        self.assertEqual(self.post("/session", {})[0], 404)
+        self.assertNotIn("/clients/add", server.Handler.routes)
+
+    def test_cli(self):
+        import clients_admin
+        with mock.patch("sys.stdout"):
+            clients_admin.main(["add", "C001"])
+            clients_admin.main(["reissue", "C001"])
+            clients_admin.main(["list"])
+            with self.assertRaises(SystemExit):
+                clients_admin.main(["add", "C001"])
+            clients_admin.main(["remove", "C001"])
+        self.assertEqual(self.clients(), {})
 
 
 if __name__ == "__main__":

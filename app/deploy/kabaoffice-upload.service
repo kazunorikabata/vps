@@ -13,6 +13,9 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
+# 顧問先の対応表の置き場所（/var/lib/kabaoffice-upload）。ここだけ書き込める
+StateDirectory=kabaoffice-upload
+StateDirectoryMode=0750
 
 [Install]
 WantedBy=multi-user.target

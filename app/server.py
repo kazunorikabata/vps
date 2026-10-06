@@ -5,25 +5,33 @@
 送信後にドライブ上のファイルを確認するだけ。nginx の /api/upload/ から転送される。
 ドライブへは事務所の Google アカウントのログイン情報（google_login.py で保存）で接続し、
 権限は drive.file（このプログラムが作ったフォルダとファイルだけ）に限る。
+事務所内ページ（/staff/）用の顧問先管理は別のポート（nginx の /api/staff/、ベーシック認証付き）で受ける。
 """
 import json
 import logging
 import os
 import re
+import secrets
 import threading
 import time
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import requests
+import segno
 from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2.credentials import Credentials
 
-CONFIG_DIR = os.environ.get("UPLOAD_CONFIG_DIR", "/etc/kabaoffice-upload")
-CLIENTS_FILE = os.path.join(CONFIG_DIR, "clients.json")
+CONFIG_DIR = os.environ.get("UPLOAD_CONFIG_DIR", "/etc/kabaoffice-upload")   # 読み取り専用（ログイン情報）
+DATA_DIR = os.environ.get("UPLOAD_DATA_DIR", "/var/lib/kabaoffice-upload")    # 書き込み可（顧問先の対応表）
 TOKEN_FILE = os.path.join(CONFIG_DIR, "oauth-token.json")
+CLIENTS_FILE = os.path.join(DATA_DIR, "clients.json")
+ROOT_FILE = os.path.join(DATA_DIR, "root-folder.json")
+ROOT_NAME = "顧問先資料"
 ALLOWED_ORIGIN = os.environ.get("UPLOAD_ALLOWED_ORIGIN", "https://kabaoffice.com")
+UPLOAD_BASE_URL = ALLOWED_ORIGIN + "/upload/#"
 PORT = int(os.environ.get("UPLOAD_PORT", "8081"))
+STAFF_PORT = int(os.environ.get("UPLOAD_STAFF_PORT", "8082"))
 
 MAX_SIZE = 50 * 1024 * 1024
 MAX_BODY = 4096
@@ -50,6 +58,7 @@ SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 JST = timezone(timedelta(hours=9))
 TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{20,128}$")
 FILE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{10,200}$")
+CODE_RE = re.compile(r"^[A-Za-z0-9_-]{1,20}$")
 
 log = logging.getLogger("upload")
 
@@ -69,8 +78,7 @@ def find_client(token):
     if not isinstance(token, str) or not TOKEN_RE.match(token):
         raise UploadError(403, "このURLは無効です。事務所にお問い合わせください。")
     # 毎回読み込むので、対応表を書き換えたら再起動しなくても反映される
-    with open(CLIENTS_FILE, encoding="utf-8") as f:
-        client = json.load(f).get(token)
+    client = load_json(CLIENTS_FILE).get(token)
     if not client:
         raise UploadError(403, "このURLは無効です。事務所にお問い合わせください。")
     return client
@@ -202,6 +210,93 @@ def trash_file(file_id):
     r.raise_for_status()
 
 
+# --- 顧問先の対応表（URLの鍵 → ドライブのフォルダ） ---
+
+_clients_lock = threading.Lock()
+
+
+def load_json(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+
+
+def save_json(path, data):
+    # 書きかけのファイルを読まないよう、別名で書いてから置き換える。
+    # root がコマンドで書いても、受付サーバー（DATA_DIR の持ち主）が書き続けられるようにする
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    st = os.stat(path if os.path.exists(path) else os.path.dirname(path))
+    os.chown(tmp, st.st_uid, st.st_gid)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, path)
+
+
+def root_folder():
+    """「顧問先資料」フォルダのIDを返す。なければ作る"""
+    root = load_json(ROOT_FILE)
+    if not root:
+        root = {"folder_id": create_folder(ROOT_NAME)}
+        save_json(ROOT_FILE, root)
+    return root["folder_id"]
+
+
+def check_code(code):
+    if not isinstance(code, str) or not CODE_RE.match(code):
+        raise UploadError(400, "番号は半角英数字（20文字以内）で入力してください。")
+    return code
+
+
+def find_token(clients, code):
+    for token, c in clients.items():
+        if c["code"] == code:
+            return token
+    raise UploadError(404, f"{code} は登録されていません。")
+
+
+def list_clients():
+    """[(URLの鍵, 顧問先)] を番号順に返す"""
+    return sorted(load_json(CLIENTS_FILE).items(), key=lambda item: item[1]["code"])
+
+
+def add_client(code):
+    """フォルダを作って登録し、URLの鍵を返す"""
+    check_code(code)
+    with _clients_lock:
+        clients = load_json(CLIENTS_FILE)
+        if any(c["code"] == code for c in clients.values()):
+            raise UploadError(409, f"{code} はすでに登録されています。")
+        folder_id = create_folder(code, root_folder())
+        token = secrets.token_urlsafe(32)
+        clients[token] = {"code": code, "folder_id": folder_id, "created": f"{datetime.now(JST):%Y-%m-%d}"}
+        save_json(CLIENTS_FILE, clients)
+    return token
+
+
+def remove_client(code):
+    """登録を削除する（URLは使えなくなる。フォルダと資料は残る）"""
+    check_code(code)
+    with _clients_lock:
+        clients = load_json(CLIENTS_FILE)
+        del clients[find_token(clients, code)]
+        save_json(CLIENTS_FILE, clients)
+
+
+def reissue_client(code):
+    """同じフォルダのまま、新しいURLの鍵に取り替える"""
+    check_code(code)
+    with _clients_lock:
+        clients = load_json(CLIENTS_FILE)
+        client = clients.pop(find_token(clients, code))
+        token = secrets.token_urlsafe(32)
+        clients[token] = client
+        save_json(CLIENTS_FILE, clients)
+    return token
+
+
 # --- API ---
 
 def handle_session(body):
@@ -238,25 +333,76 @@ def handle_complete(body):
     return {"ok": True}
 
 
+def client_view(token, client):
+    return {
+        "code": client["code"],
+        "created": client.get("created", ""),
+        "folderUrl": f"https://drive.google.com/drive/folders/{client['folder_id']}",
+        "uploadUrl": UPLOAD_BASE_URL + token,
+    }
+
+
+def handle_staff_list(body):
+    return {"clients": [client_view(t, c) for t, c in list_clients()]}
+
+
+def handle_staff_add(body):
+    token = add_client(body.get("code"))
+    return {"client": client_view(token, load_json(CLIENTS_FILE)[token])}
+
+
+def handle_staff_remove(body):
+    remove_client(body.get("code"))
+    return {"ok": True}
+
+
+def handle_staff_reissue(body):
+    token = reissue_client(body.get("code"))
+    return {"client": client_view(token, load_json(CLIENTS_FILE)[token])}
+
+
+def handle_staff_qr(body):
+    clients = load_json(CLIENTS_FILE)
+    token = find_token(clients, check_code(body.get("code")))
+    qr = segno.make(UPLOAD_BASE_URL + token, error="m")
+    return {"dataUrl": qr.png_data_uri(scale=8, border=4)}
+
+
 ROUTES = {"/session": handle_session, "/complete": handle_complete}
+
+# 顧問先用とは別のポートで受ける。顧問先用の入口から管理の機能に届かないようにするため
+STAFF_ROUTES = {
+    "/clients/list": handle_staff_list,
+    "/clients/add": handle_staff_add,
+    "/clients/remove": handle_staff_remove,
+    "/clients/reissue": handle_staff_reissue,
+    "/clients/qr": handle_staff_qr,
+}
 
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "kabaoffice-upload"
+    routes = ROUTES
 
     def do_POST(self):
         try:
             if self.headers.get("Origin") != ALLOWED_ORIGIN:
                 raise UploadError(403, "不正なリクエストです。")
-            route = ROUTES.get(self.path)
+            route = self.routes.get(self.path)
             if route is None:
                 raise UploadError(404, "見つかりません。")
-            self.send_json(200, route(self.read_json()))
+            body = self.read_json()
+            data = route(body)
+            self.after_route(body)
+            self.send_json(200, data)
         except UploadError as e:
             self.send_json(e.status, {"error": e.message})
         except Exception:
             log.exception("unexpected error")
             self.send_json(500, {"error": "サーバーでエラーが起きました。時間をおいて再度お試しください。"})
+
+    def after_route(self, body):
+        pass
 
     def read_json(self):
         try:
@@ -286,10 +432,21 @@ class Handler(BaseHTTPRequestHandler):
         log.info(format, *args)
 
 
+class StaffHandler(Handler):
+    routes = STAFF_ROUTES
+
+    def after_route(self, body):
+        # 誰が変更したかを残す（ユーザー名は nginx のベーシック認証から）
+        if self.path != "/clients/list":
+            log.info("staff=%s %s code=%s", self.headers.get("X-Staff-User", "-"), self.path, body.get("code"))
+
+
 def main():
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    staff = ThreadingHTTPServer(("127.0.0.1", STAFF_PORT), StaffHandler)
+    threading.Thread(target=staff.serve_forever, daemon=True).start()
     server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
-    log.info("listening on 127.0.0.1:%d", PORT)
+    log.info("listening on 127.0.0.1:%d (staff %d)", PORT, STAFF_PORT)
     server.serve_forever()
 
 

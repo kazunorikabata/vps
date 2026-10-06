@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="no-referrer">
+  <title>顧問先の管理｜蒲田和紀税理士事務所</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&family=Noto+Serif+JP:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="/staff/staff.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container header-inner">
+      <a href="/staff/" class="logo">蒲田和紀税理士事務所</a>
+      <span class="staff-badge">事務所内</span>
+    </div>
+  </header>
+
+  <main class="section">
+    <div class="container staff">
+      <h1 class="section-title">顧問先の管理</h1>
+
+      <p id="message" class="staff-message" role="status" hidden></p>
+
+      <section class="staff-card">
+        <h2>顧問先を追加</h2>
+        <form id="add-form" class="add-form">
+          <label for="code">番号</label>
+          <input id="code" required maxlength="20" pattern="[A-Za-z0-9_\-]{1,20}" placeholder="例：C001" autocomplete="off">
+          <button type="submit" class="button">追加</button>
+        </form>
+        <p class="hint">半角英数字で入力してください。顧問先名は、ドライブのフォルダ名で管理します。</p>
+      </section>
+
+      <section id="detail" class="staff-card" hidden>
+        <h2 id="detail-title"></h2>
+        <p class="detail-label">アップロード用URL</p>
+        <div class="url-row">
+          <input id="detail-url" readonly aria-label="アップロード用URL">
+          <button type="button" id="copy" class="button">コピー</button>
+        </div>
+        <div class="qr">
+          <img id="detail-qr" alt="アップロード用URLのQRコード">
+          <a id="detail-qr-save" class="button button-outline" download>QRコードを保存</a>
+        </div>
+        <p class="hint">URLとQRコードを知っている人は、誰でもこの顧問先のフォルダに資料を送れます。顧問先以外には渡さないでください。</p>
+        <button type="button" id="detail-close" class="button button-outline">閉じる</button>
+      </section>
+
+      <section class="staff-card">
+        <h2>登録済みの顧問先</h2>
+        <div class="table-wrap">
+          <table class="clients-table">
+            <thead>
+              <tr><th>番号</th><th>登録日</th><th>フォルダ</th><th>操作</th></tr>
+            </thead>
+            <tbody id="clients"></tbody>
+          </table>
+        </div>
+        <p id="empty" class="hint" hidden>まだ登録されていません。</p>
+      </section>
+    </div>
+  </main>
+
+  <script src="/staff/staff.js"></script>
+</body>
+</html>
