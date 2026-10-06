@@ -1,0 +1,195 @@
+:root {
+  --navy: #1f3a5f;
+  --bg: #faf8f4;
+  --bg-alt: #f1ede5;
+  --accent: #a8875a;
+  --text: #333;
+  --line: #ddd6ca;
+  --serif: "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif;
+  --sans: "Noto Sans JP", "Hiragino Sans", "Yu Gothic", sans-serif;
+  --header-h: 64px;
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; scroll-padding-top: var(--header-h); }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.8;
+}
+
+a { color: var(--navy); }
+
+h1, h2, h3 { font-family: var(--serif); color: var(--navy); line-height: 1.5; }
+
+.container { max-width: 960px; margin: 0 auto; padding: 0 20px; }
+
+/* ヘッダー */
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: #fff;
+  border-bottom: 1px solid var(--line);
+}
+.header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--header-h);
+}
+.logo {
+  font-family: var(--serif);
+  font-weight: 700;
+  font-size: 1.15rem;
+  color: var(--navy);
+  text-decoration: none;
+}
+.site-nav { display: flex; gap: 24px; }
+.site-nav a { text-decoration: none; font-size: 0.95rem; }
+.site-nav a:hover { color: var(--accent); }
+
+.menu-toggle {
+  display: none;
+  width: 44px;
+  height: 44px;
+  padding: 10px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.menu-toggle span {
+  display: block;
+  height: 2px;
+  margin: 5px 0;
+  background: var(--navy);
+}
+
+/* メイン */
+.hero {
+  padding: 96px 0;
+  background: var(--navy);
+  color: #fff;
+  text-align: center;
+}
+.hero h1 { color: #fff; font-size: 2rem; margin: 0 0 32px; }
+.hero-lead { color: #e4d6bf; margin: 0 0 8px; }
+.hero-tel { margin: 0; }
+.hero-tel span, .hero-tel small { display: block; }
+.hero-tel a {
+  display: inline-block;
+  margin: 4px 0;
+  color: #fff;
+  font-size: 1.8rem;
+  font-weight: 700;
+  text-decoration: none;
+  border-bottom: 2px solid var(--accent);
+}
+
+/* セクション共通 */
+.section { padding: 72px 0; }
+.section-alt { background: var(--bg-alt); }
+.section-title {
+  margin: 0 0 40px;
+  font-size: 1.6rem;
+  text-align: center;
+}
+.section-title::after {
+  content: "";
+  display: block;
+  width: 40px;
+  height: 2px;
+  margin: 12px auto 0;
+  background: var(--accent);
+}
+
+/* 事務所案内 */
+.greeting { margin-bottom: 40px; }
+.greeting h3 { margin-top: 0; }
+.signature { text-align: right; font-family: var(--serif); }
+
+/* 表 */
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; background: #fff; }
+th, td { padding: 14px 16px; border: 1px solid var(--line); text-align: left; }
+th { background: #f6f2ea; color: var(--navy); font-weight: 700; white-space: nowrap; }
+
+/* 業務内容 */
+.service-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 20px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.service-list li {
+  padding: 24px;
+  background: #fff;
+  border-top: 3px solid var(--navy);
+}
+.service-list h3 { margin: 0 0 8px; font-size: 1.1rem; }
+.service-list p { margin: 0; }
+
+/* アクセス */
+.access-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
+.access-info { margin: 0; }
+.access-info dt { font-weight: 700; color: var(--navy); }
+.access-info dd { margin: 0 0 16px; }
+.map iframe { width: 100%; height: 100%; min-height: 300px; border: 0; }
+
+/* お問い合わせ */
+.contact-lead { text-align: center; }
+.contact-boxes { max-width: 480px; margin: 0 auto; }
+.contact-box {
+  padding: 32px 20px;
+  background: #fff;
+  border: 1px solid var(--line);
+  text-align: center;
+}
+.contact-box h3 { margin: 0 0 8px; }
+.contact-box p { margin: 8px 0 0; font-size: 0.9rem; }
+.contact-main {
+  font-size: 1.4rem;
+  font-weight: 700;
+  text-decoration: none;
+  word-break: break-all;
+}
+
+/* フッター */
+.site-footer {
+  padding: 32px 0;
+  background: var(--navy);
+  color: #fff;
+  text-align: center;
+  font-size: 0.9rem;
+}
+.site-footer p { margin: 4px 0; }
+
+/* スマホ */
+@media (max-width: 768px) {
+  .menu-toggle { display: block; }
+  .site-nav {
+    display: none;
+    position: absolute;
+    top: var(--header-h);
+    left: 0;
+    right: 0;
+    flex-direction: column;
+    gap: 0;
+    background: #fff;
+    border-bottom: 1px solid var(--line);
+  }
+  .site-nav.is-open { display: flex; }
+  .site-nav a { padding: 14px 20px; border-top: 1px solid var(--line); }
+
+  .hero { padding: 64px 0; }
+  .hero h1 { font-size: 1.5rem; }
+  .section { padding: 56px 0; }
+  .access-grid { grid-template-columns: 1fr; }
+}
