@@ -7,11 +7,13 @@ const NETWORK_ERROR = '通信できませんでした。電波の良い場所で
 const token = location.hash.slice(1);
 const form = document.getElementById('upload-form');
 const input = document.getElementById('files');
+const dropZone = document.getElementById('drop-zone');
 const list = document.getElementById('file-list');
 const sendButton = document.getElementById('send');
 const done = document.getElementById('done');
 
 let entries = [];
+let sending = false;
 
 if (!/^[A-Za-z0-9_-]{20,128}$/.test(token)) {
   form.hidden = true;
@@ -19,14 +21,31 @@ if (!/^[A-Za-z0-9_-]{20,128}$/.test(token)) {
 }
 
 input.addEventListener('change', () => {
-  entries = Array.from(input.files).map((file) => ({ file, error: checkFile(file), sent: false }));
-  renderList();
+  addFiles(input.files);
+  // 取り消したファイルを、もう一度選べるようにする
+  input.value = '';
 });
+
+dropZone.addEventListener('dragover', (event) => {
+  event.preventDefault();
+  if (!sending) dropZone.classList.add('is-dragover');
+});
+dropZone.addEventListener('dragleave', (event) => {
+  if (!dropZone.contains(event.relatedTarget)) dropZone.classList.remove('is-dragover');
+});
+dropZone.addEventListener('drop', (event) => {
+  event.preventDefault();
+  dropZone.classList.remove('is-dragover');
+  if (!sending) addFiles(event.dataTransfer.files);
+});
+// 枠の外に落としたときに、ブラウザがファイルを開いてしまわないようにする
+window.addEventListener('dragover', (event) => event.preventDefault());
+window.addEventListener('drop', (event) => event.preventDefault());
 
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
-  sendButton.disabled = true;
-  input.disabled = true;
+  sending = true;
+  updateControls();
   let failed = 0;
   for (const entry of entries) {
     if (entry.error || entry.sent) continue;
@@ -40,23 +59,34 @@ form.addEventListener('submit', async (event) => {
       setStatus(entry, err.message, 'error');
     }
   }
-  input.disabled = false;
+  sending = false;
+  updateControls();
   if (failed === 0) {
     form.hidden = true;
     done.hidden = false;
-  } else {
-    // 失敗したものだけ、もう一度送れるようにする
-    sendButton.disabled = false;
   }
+  // 失敗があれば、そのまま「送信する」で失敗したものだけを送り直せる
 });
 
 document.getElementById('again').addEventListener('click', () => {
   entries = [];
-  input.value = '';
-  renderList();
+  list.innerHTML = '';
+  updateControls();
   done.hidden = true;
   form.hidden = false;
 });
+
+function addFiles(files) {
+  for (const file of files) {
+    const duplicate = entries.some((entry) => entry.file.name === file.name
+      && entry.file.size === file.size && entry.file.lastModified === file.lastModified);
+    if (duplicate) continue;
+    const entry = { file, error: checkFile(file), sent: false };
+    createItem(entry);
+    entries.push(entry);
+  }
+  updateControls();
+}
 
 function checkFile(file) {
   const ext = file.name.includes('.') ? file.name.split('.').pop().toLowerCase() : '';
@@ -66,23 +96,36 @@ function checkFile(file) {
   return '';
 }
 
-function renderList() {
-  list.innerHTML = '';
-  for (const entry of entries) {
-    const li = document.createElement('li');
-    const name = document.createElement('span');
-    name.className = 'file-name';
-    name.textContent = entry.file.name;
-    entry.status = document.createElement('span');
-    entry.bar = document.createElement('progress');
-    entry.bar.max = 100;
-    entry.bar.value = 0;
-    entry.bar.hidden = true;
-    li.append(name, entry.status, entry.bar);
-    list.append(li);
-    setStatus(entry, entry.error || formatSize(entry.file.size), entry.error ? 'error' : '');
-  }
-  sendButton.disabled = !entries.some((entry) => !entry.error);
+function createItem(entry) {
+  entry.li = document.createElement('li');
+  const name = document.createElement('span');
+  name.className = 'file-name';
+  name.textContent = entry.file.name;
+  entry.status = document.createElement('span');
+  entry.removeButton = document.createElement('button');
+  entry.removeButton.type = 'button';
+  entry.removeButton.className = 'file-remove';
+  entry.removeButton.textContent = '×';
+  entry.removeButton.setAttribute('aria-label', `${entry.file.name} を取り消す`);
+  entry.removeButton.addEventListener('click', () => {
+    entries = entries.filter((e) => e !== entry);
+    entry.li.remove();
+    updateControls();
+  });
+  entry.bar = document.createElement('progress');
+  entry.bar.max = 100;
+  entry.bar.value = 0;
+  entry.bar.hidden = true;
+  entry.li.append(name, entry.status, entry.removeButton, entry.bar);
+  list.append(entry.li);
+  setStatus(entry, entry.error || formatSize(entry.file.size), entry.error ? 'error' : '');
+}
+
+function updateControls() {
+  sendButton.disabled = sending || !entries.some((entry) => !entry.error && !entry.sent);
+  input.disabled = sending;
+  dropZone.classList.toggle('is-disabled', sending);
+  for (const entry of entries) entry.removeButton.hidden = sending || entry.sent;
 }
 
 function setStatus(entry, text, kind = '') {

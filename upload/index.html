@@ -32,10 +32,13 @@
           <li>PDF、画像（JPG・PNG・HEIC）、Excel、Word、CSV</li>
           <li>送信した資料は、このページには表示されません</li>
         </ul>
-        <label class="file-picker">
-          <input type="file" id="files" multiple accept=".pdf,.jpg,.jpeg,.png,.heic,.xlsx,.xls,.docx,.doc,.csv">
-          <span>ファイルを選ぶ</span>
-        </label>
+        <div id="drop-zone" class="drop-zone">
+          <p class="drop-hint">ここにファイルをドロップ</p>
+          <label class="file-picker">
+            <input type="file" id="files" multiple accept=".pdf,.jpg,.jpeg,.png,.heic,.xlsx,.xls,.docx,.doc,.csv">
+            <span>ファイルを選ぶ</span>
+          </label>
+        </div>
         <ul id="file-list" class="file-list"></ul>
         <button type="submit" id="send" class="send-button" disabled>送信する</button>
       </form>
