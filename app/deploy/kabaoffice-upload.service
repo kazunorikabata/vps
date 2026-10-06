@@ -1,0 +1,18 @@
+[Unit]
+Description=kabaoffice 資料アップロード受付サーバー
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=kabaupload
+Group=kabaupload
+WorkingDirectory=/opt/kabaoffice-upload
+ExecStart=/opt/kabaoffice-upload/venv/bin/python /opt/kabaoffice-upload/server.py
+Restart=on-failure
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

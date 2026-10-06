@@ -15,4 +15,5 @@ rsync -av "$@" \
   --exclude 'CLAUDE.md' \
   --exclude 'README.md' \
   --exclude 'deploy.sh' \
+  --exclude 'app/' \
   "$SRC" "$DEST"

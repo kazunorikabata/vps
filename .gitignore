@@ -1,0 +1,6 @@
+# VPS に置く設定ファイル（リポジトリには入れない）
+app/clients.json
+app/oauth-token.json
+app/root-folder.json
+__pycache__/
+venv/
