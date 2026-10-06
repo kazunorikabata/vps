@@ -170,6 +170,7 @@ th { background: #f6f2ea; color: var(--navy); font-weight: 700; white-space: now
   font-size: 0.9rem;
 }
 .site-footer p { margin: 4px 0; }
+.footer-staff a { color: #e4d6bf; font-size: 0.85rem; }
 
 /* スマホ */
 @media (max-width: 768px) {
