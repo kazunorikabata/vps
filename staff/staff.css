@@ -66,3 +66,32 @@
 .clients-table td { vertical-align: middle; }
 .ops .button { margin: 2px 6px 2px 0; }
 .ops .confirm-text { margin: 0 0 4px; font-size: 0.9rem; }
+
+/* Claude Code の会話の一覧 */
+.sessions-title { margin: 24px 0 8px; font-size: 1.05rem; }
+.session-list { margin: 0; padding: 0; list-style: none; }
+.session {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--line);
+  margin-bottom: 8px;
+}
+.session.is-running { border-left-color: #2e6b3a; }
+.session.is-terminal { border-left-color: var(--accent); }
+.session-info { flex: 1; min-width: 12em; }
+.session-title { display: block; word-break: break-all; }
+.session-meta { display: block; color: #666; font-size: 0.85rem; }
+.resume-help { flex-basis: 100%; }
+.resume-help p { margin: 0 0 6px; font-size: 0.9rem; }
+.resume-help input {
+  width: 100%;
+  margin-bottom: 6px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  font-family: monospace;
+  font-size: 0.8rem;
+}

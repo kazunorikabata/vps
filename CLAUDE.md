@@ -18,9 +18,10 @@
   - ドライブへは事務所アカウントの OAuth（スコープは `drive.file`）で接続する。権限を広げないこと
   - VPS 上の配置：プログラムは `/opt/kabaoffice-upload/`、ログイン情報は `/etc/kabaoffice-upload/`（読まない）、顧問先の対応表は `/var/lib/kabaoffice-upload/`。nginx の `/api/upload/` から `127.0.0.1:8081` に転送する
 - 事務所内ページ：`staff/`（顧問先の追加・削除・URL再発行・QRコード）。nginx のベーシック認証（`/etc/nginx/kabaoffice-staff.htpasswd`、職員が自分で登録する）をかけ、`/api/staff/` から別ポート `127.0.0.1:8082` に転送する。顧問先用の入口から管理の機能に届かないよう、ポートを分けている
+- 管理ページの Claude Code 会話一覧：`staff/claude.js`。dev の crontab で `app/claude_sessions.py` を毎分実行し、`/var/www/kabaoffice/staff/claude-sessions.json` に書き出す（会話の中身は書き出さず、日時と最初の依頼の冒頭だけ）。ブラウザから VPS のプログラムを起動する機能は作らない
 
 ## コマンド
-- テスト：`cd app && /opt/kabaoffice-upload/venv/bin/python -B -m unittest test_server`（Google への接続はダミーに置き換え済み）
+- テスト：`cd app && /opt/kabaoffice-upload/venv/bin/python -B -m unittest test_server test_claude_sessions`（Google への接続はダミーに置き換え済み）
 - 受付サーバーの設置・更新：`sudo bash app/deploy/setup.sh`。sudo にパスワードが要るため、ユーザーに実行してもらう
 - 顧問先の登録・削除：`sudo /opt/kabaoffice-upload/venv/bin/python /opt/kabaoffice-upload/clients_admin.py add|remove|reissue|list`
 - `deploy.sh` は `app/` を公開フォルダに送らない。公開ファイル以外を追加したら除外の設定を確認する

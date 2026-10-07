@@ -70,7 +70,12 @@
       <section class="staff-card">
         <h2>サイトの修正</h2>
         <p>サイトの修正や公開は、Claude Code のリモートコントロールで行います。代表のアカウントでログインしている端末でのみ使えます。</p>
-        <a href="https://claude.ai/code" class="button" target="_blank" rel="noopener">Claude Code を開く</a>
+        <a href="https://claude.ai/code" class="button" target="_blank" rel="noopener">新しく始める</a>
+
+        <h3 class="sessions-title">会話の一覧</h3>
+        <ul id="claude-sessions" class="session-list"></ul>
+        <p id="claude-empty" class="hint" hidden>会話の記録がありません。</p>
+        <p id="claude-updated" class="hint"></p>
       </section>
     </div>
   </main>
@@ -83,5 +88,6 @@
   </footer>
 
   <script src="/staff/staff.js"></script>
+  <script src="/staff/claude.js"></script>
 </body>
 </html>
