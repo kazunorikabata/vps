@@ -1,21 +1,6 @@
 // 事務所内ページ：入力ページの作成・顧問先へのURLの発行・届いた入力内容の確認と書き出し
 // 暗号化した入力内容は、このページに読み込んだ秘密鍵で、このブラウザの中だけで復号する
-const TYPES = {
-  heading: '見出し',
-  text: '1行の文字',
-  textarea: '複数行の文字',
-  number: '数字・金額',
-  date: '日付',
-  select: '選択肢',
-  checkbox: 'チェック（はい）',
-  tel: '電話番号',
-  email: 'メールアドレス',
-  zip: '郵便番号',
-  mynumber: 'マイナンバー',
-  table: '表（扶養家族など複数行）',
-};
-const COLUMN_TYPES = { text: '文字', number: '数字・金額', date: '日付', mynumber: 'マイナンバー' };
-
+// 入力ページの作成画面は form-editor.js、部品の表示は /form/render.js（顧問先の画面と共通）
 const staff = document.querySelector('.staff');
 const message = document.getElementById('message');
 
@@ -23,7 +8,6 @@ let forms = [];
 let registeredKey = null;   // サーバーに登録されている公開鍵 { fingerprint, set }
 let loadedKey = null;       // このページに読み込んだ秘密鍵 { privateKey, fingerprint }
 let pendingKey = null;      // 作ったばかりで、まだ登録していない鍵
-let editing = null;         // 編集中の入力ページ { id, form }
 let current = null;         // 依頼URL・入力内容を表示している入力ページ
 let submissions = [];
 
@@ -148,7 +132,7 @@ function formRow(form) {
   enc.textContent = form.encrypt ? 'あり' : 'なし';
   const ops = document.createElement('td');
   ops.className = 'ops';
-  tr.append(cell(form.title), cell(enc), cell(String(form.fields.filter((f) => f.type !== 'heading').length)),
+  tr.append(cell(form.title), cell(enc), cell(String([...FormRender.iterFields(form.fields)].filter(FormRender.isInput).length)),
     cell(String(form.requests)), cell(form.updated), ops);
   showFormOps(ops, form);
   return tr;
@@ -168,206 +152,6 @@ function showFormOps(td, form) {
         await loadForms();
       }, () => showFormOps(td, form)), 'button-danger'),
   );
-}
-
-// --- 入力ページの編集 ---
-
-const editor = document.getElementById('editor');
-const edFields = document.getElementById('ed-fields');
-const edEncrypt = document.getElementById('ed-encrypt');
-const addType = document.getElementById('ed-add-type');
-for (const [value, label] of Object.entries(TYPES)) addType.append(new Option(label, value));
-addType.value = 'text';
-
-document.getElementById('new-form').addEventListener('click', () => openEditor(null));
-document.getElementById('ed-cancel').addEventListener('click', () => { editor.hidden = true; });
-document.getElementById('ed-title').addEventListener('input', (e) => { editing.form.title = e.target.value; });
-document.getElementById('ed-description').addEventListener('input', (e) => { editing.form.description = e.target.value; });
-edEncrypt.addEventListener('change', () => {
-  editing.form.encrypt = edEncrypt.checked;
-  showEncryptNote();
-});
-
-document.getElementById('ed-add').addEventListener('click', () => {
-  const field = { id: newId(editing.form.fields, 'q'), type: addType.value, label: '', help: '', required: false };
-  prepareField(field);
-  editing.form.fields.push(field);
-  renderFields();
-  edFields.lastElementChild.querySelector('input').focus();
-});
-
-document.getElementById('ed-save').addEventListener('click', () => run(async () => {
-  const body = { form: editing.form };
-  if (editing.id) body.id = editing.id;
-  const { form } = await api('forms/save', body);
-  editing = { id: form.id, form: structuredClone(form) };
-  document.getElementById('editor-title').textContent = `「${form.title}」を編集`;
-  showMessage(`「${form.title}」を保存しました`, 'ok');
-  await loadForms();
-}));
-
-function openEditor(form) {
-  editing = form
-    ? { id: form.id, form: structuredClone({ title: form.title, description: form.description, encrypt: form.encrypt, fields: form.fields }) }
-    : { id: null, form: { title: '', description: '', encrypt: true, fields: [] } };
-  for (const field of editing.form.fields) prepareField(field);
-  document.getElementById('editor-title').textContent = form ? `「${form.title}」を編集` : '新しい入力ページ';
-  document.getElementById('ed-title').value = editing.form.title;
-  document.getElementById('ed-description').value = editing.form.description;
-  renderFields();
-  editor.hidden = false;
-  editor.scrollIntoView({ behavior: 'smooth', block: 'start' });
-}
-
-// 種類に必要な設定（選択肢・表の列）をそろえる
-function prepareField(field) {
-  if (field.type === 'select' && !field.options) field.options = [];
-  if (field.type === 'table') {
-    if (!field.columns) field.columns = [{ id: 'c1', type: 'text', label: '' }];
-    if (!field.maxRows) field.maxRows = 10;
-  }
-}
-
-function newId(items, prefix) {
-  let n = items.length + 1;
-  while (items.some((item) => item.id === `${prefix}${n}`)) n++;
-  return `${prefix}${n}`;
-}
-
-function hasMyNumber() {
-  return editing.form.fields.some((f) => f.type === 'mynumber'
-    || (f.type === 'table' && f.columns.some((c) => c.type === 'mynumber')));
-}
-
-// マイナンバーの項目があるときは、暗号化を外せない
-function showEncryptNote() {
-  const forced = hasMyNumber();
-  if (forced) editing.form.encrypt = true;
-  edEncrypt.checked = editing.form.encrypt;
-  edEncrypt.disabled = forced;
-  const note = document.getElementById('ed-encrypt-note');
-  if (forced) note.textContent = 'マイナンバーの項目があるため、暗号化は外せません。';
-  else if (editing.form.encrypt) note.textContent = '入力内容は事務所の鍵でしか開けません。サーバーやドライブから漏れても読まれません。';
-  else note.textContent = '暗号化しない場合、入力内容はドライブにそのまま保存されます。個人情報を含む入力ページでは暗号化してください。';
-}
-
-function renderFields() {
-  const fields = editing.form.fields;
-  edFields.replaceChildren(...fields.map((field, i) => fieldEditor(field, i, fields)));
-  showEncryptNote();
-}
-
-function fieldEditor(field, i, fields) {
-  const li = document.createElement('li');
-  li.className = `ed-field${field.type === 'heading' ? ' is-heading' : ''}`;
-
-  const type = select(TYPES, field.type, '項目の種類');
-  type.addEventListener('change', () => {
-    field.type = type.value;
-    if (field.type !== 'select') delete field.options;
-    if (field.type !== 'table') { delete field.columns; delete field.maxRows; }
-    prepareField(field);
-    renderFields();
-  });
-  const label = input(field.label, field.type === 'heading' ? '見出しの文字' : '項目名（例：氏名）', 200);
-  label.addEventListener('input', () => { field.label = label.value; });
-  const top = document.createElement('div');
-  top.className = 'ed-field-top';
-  top.append(type, label);
-
-  const help = input(field.help || '', '説明（任意）：入力のしかたなど', 500);
-  help.addEventListener('input', () => { field.help = help.value; });
-  help.style.marginTop = '8px';
-
-  const sub = document.createElement('div');
-  sub.className = 'ed-field-sub';
-  if (field.type !== 'heading') {
-    sub.append(checkLine('必須', field.required, (checked) => { field.required = checked; }));
-  }
-  const ops = document.createElement('div');
-  ops.className = 'ed-field-ops';
-  ops.append(
-    button('↑', () => move(fields, i, -1), 'button-outline'),
-    button('↓', () => move(fields, i, 1), 'button-outline'),
-    button('削除', () => { fields.splice(i, 1); renderFields(); }, 'button-danger'),
-  );
-  ops.children[0].disabled = i === 0;
-  ops.children[1].disabled = i === fields.length - 1;
-  ops.children[0].setAttribute('aria-label', '上へ');
-  ops.children[1].setAttribute('aria-label', '下へ');
-  sub.append(ops);
-
-  li.append(top, help);
-  if (field.type === 'select') li.append(optionsEditor(field));
-  if (field.type === 'table') li.append(columnsEditor(field));
-  li.append(sub);
-  return li;
-}
-
-function optionsEditor(field) {
-  const area = document.createElement('textarea');
-  area.rows = 3;
-  area.placeholder = '選択肢を1行に1つずつ入力（例：甲欄、乙欄）';
-  area.setAttribute('aria-label', '選択肢');
-  area.value = field.options.join('\n');
-  area.addEventListener('input', () => {
-    field.options = area.value.split('\n').map((s) => s.trim()).filter(Boolean);
-  });
-  return area;
-}
-
-function columnsEditor(field) {
-  const box = document.createElement('div');
-  box.className = 'ed-columns';
-  const title = document.createElement('p');
-  title.className = 'ed-small';
-  title.style.margin = '0 0 6px';
-  title.textContent = '表の列';
-  box.append(title);
-  field.columns.forEach((col, i) => {
-    const row = document.createElement('div');
-    row.className = 'ed-column';
-    const name = input(col.label, '列名（例：続柄）', 100);
-    name.addEventListener('input', () => { col.label = name.value; });
-    const type = select(COLUMN_TYPES, col.type, '列の種類');
-    type.addEventListener('change', () => {
-      col.type = type.value;
-      showEncryptNote();
-    });
-    const remove = button('×', () => {
-      field.columns.splice(i, 1);
-      renderFields();
-    }, 'button-outline');
-    remove.setAttribute('aria-label', '列を削除');
-    remove.disabled = field.columns.length === 1;
-    row.append(name, type, remove);
-    box.append(row);
-  });
-  const rows = document.createElement('label');
-  rows.className = 'ed-rows ed-small';
-  const max = document.createElement('input');
-  max.type = 'number';
-  max.min = 1;
-  max.max = 50;
-  max.value = field.maxRows;
-  max.addEventListener('input', () => { field.maxRows = Number(max.value); });
-  rows.append('最大の行数', max);
-  const add = button('列を追加', () => {
-    field.columns.push({ id: newId(field.columns, 'c'), type: 'text', label: '' });
-    renderFields();
-  }, 'button-outline');
-  add.disabled = field.columns.length >= 20;
-  const footer = document.createElement('div');
-  footer.className = 'ed-field-sub';
-  footer.append(add, rows);
-  box.append(footer);
-  return box;
-}
-
-function move(fields, i, step) {
-  const [field] = fields.splice(i, 1);
-  fields.splice(i + step, 0, field);
-  renderFields();
 }
 
 // --- 顧問先への依頼URL ---
@@ -520,54 +304,18 @@ async function showSubmission(sub) {
   const { record, answers } = await openRecord(sub.id);
   const h = document.createElement('h3');
   h.textContent = `${record.code}　${formatDate(record.submitted)}`;
-  const table = document.createElement('table');
-  for (const field of record.fields) {
-    const tr = table.insertRow();
-    if (field.type === 'heading') {
-      const th = document.createElement('th');
-      th.colSpan = 2;
-      th.className = 'print-heading';
-      th.textContent = field.label;
-      tr.append(th);
-      continue;
-    }
-    const th = document.createElement('th');
-    th.textContent = field.label;
-    tr.append(th);
-    const td = tr.insertCell();
-    const value = answers[field.id];
-    if (field.type === 'table') td.append(answerTable(field, value || []));
-    else td.textContent = displayValue(field, value) || '—';
-  }
+  // 顧問先の画面と同じ並びで表示する（送信したときの項目で）
+  const grid = document.createElement('div');
+  FormRender.buildView(grid, record.fields, answers);
   const close = button('閉じる', () => { subView.hidden = true; subView.replaceChildren(); }, 'button-outline');
   close.style.marginTop = '12px';
-  subView.replaceChildren(h, table, close);
+  subView.replaceChildren(h, grid, close);
   subView.hidden = false;
   subView.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-function answerTable(field, rows) {
-  if (!rows.length) return document.createTextNode('—');
-  const table = document.createElement('table');
-  const head = table.insertRow();
-  for (const col of field.columns) {
-    const th = document.createElement('th');
-    th.textContent = col.label;
-    head.append(th);
-  }
-  for (const row of rows) {
-    const tr = table.insertRow();
-    for (const col of field.columns) tr.insertCell().textContent = row[col.id] || '';
-  }
-  return table;
-}
-
-function displayValue(field, value) {
-  if (field.type === 'checkbox') return value ? 'はい' : '';
-  return value == null ? '' : String(value);
-}
-
-// 加工しやすいように、1件を1行にして書き出す（表の項目は「扶養家族1_氏名」のように列を分ける）
+// 加工しやすいように、1件を1行にして書き出す。表は「扶養家族1_氏名」「月別_1月_金額」のように列を分け、
+// 合計を出す列は「月別_合計_金額」も付ける。枠の中の項目も並べる
 async function exportCsv() {
   const list = visibleSubmissions();
   if (!list.length) throw new Error('書き出す入力内容がありません');
@@ -576,31 +324,45 @@ async function exportCsv() {
     showMessage(`読み込んでいます（${i + 1}/${list.length}）…`, 'ok');
     records.push(await openRecord(sub.id));
   }
-  const fields = current.fields.filter((f) => f.type !== 'heading');
-  const rowCounts = {};
+  const fields = [...FormRender.iterFields(current.fields)].filter(FormRender.isInput);
+  const rowNames = {};
   for (const field of fields.filter((f) => f.type === 'table')) {
-    rowCounts[field.id] = Math.max(1, ...records.map((r) => (r.answers[field.id] || []).length));
+    if (field.rowLabels) {
+      rowNames[field.id] = field.rowLabels.map((r) => `_${r}_`);
+    } else {
+      const count = Math.max(1, ...records.map((r) => (r.answers[field.id] || []).length));
+      rowNames[field.id] = Array.from({ length: count }, (_, n) => `${n + 1}_`);
+    }
   }
   const header = ['顧問先', '送信日時'];
   for (const field of fields) {
-    if (field.type !== 'table') header.push(field.label);
-    else for (let n = 1; n <= rowCounts[field.id]; n++) {
-      for (const col of field.columns) header.push(`${field.label}${n}_${col.label}`);
+    if (field.type !== 'table') {
+      header.push(field.label);
+      continue;
     }
+    for (const name of rowNames[field.id]) {
+      for (const col of field.columns) header.push(`${field.label}${name}${col.label}`);
+    }
+    for (const col of field.columns.filter((c) => c.sum)) header.push(`${field.label}_合計_${col.label}`);
   }
   const lines = [header];
   for (const { record, answers } of records) {
     const line = [record.code, formatDate(record.submitted)];
     for (const field of fields) {
-      if (field.type !== 'table') line.push(displayValue(field, answers[field.id]));
-      else for (let n = 0; n < rowCounts[field.id]; n++) {
-        const row = (answers[field.id] || [])[n] || {};
-        for (const col of field.columns) line.push(row[col.id] || '');
+      if (field.type !== 'table') {
+        line.push(FormRender.displayValue(field, answers[field.id]));
+        continue;
       }
+      const rows = answers[field.id] || [];
+      rowNames[field.id].forEach((_, n) => {
+        for (const col of field.columns) line.push((rows[n] || {})[col.id] || '');
+      });
+      const sums = FormRender.sums(field, rows);
+      for (const col of field.columns.filter((c) => c.sum)) line.push(String(sums[col.id]));
     }
     lines.push(line);
   }
-  const csv = '﻿' + lines.map((line) => line.map(csvCell).join(',')).join('\r\n') + '\r\n';
+  const csv = '\ufeff' + lines.map((line) => line.map(csvCell).join(',')).join('\r\n') + '\r\n';
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
   const a = document.createElement('a');
   a.href = url;

@@ -1,0 +1,99 @@
+/* 入力ページの部品の並べ方（顧問先の入力画面・PDF・事務所内ページで共通） */
+/* 横12マス。部品ごとに --w マス使う。is-new-row は行の頭から置く */
+.fgrid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 12px 16px;
+  align-items: start;
+}
+.fgrid > * { grid-column: span var(--w, 12); min-width: 0; margin: 0; }
+.fgrid > .is-new-row { grid-column: 1 / span var(--w, 12); }
+
+/* 入力欄 */
+.f-field {
+  padding: 14px 16px;
+  background: #fff;
+  border: 1px solid var(--line);
+}
+.f-field.has-error { border-color: #b3261e; }
+.f-label { display: block; margin: 0 0 6px; font-weight: 700; }
+.f-help { margin: 0 0 8px; color: #666; font-size: 0.9rem; white-space: pre-wrap; }
+.f-error { margin: 8px 0 0; color: #b3261e; font-size: 0.9rem; font-weight: 700; }
+.f-value { margin: 0; white-space: pre-wrap; word-break: break-all; }
+.required-mark {
+  display: inline-block;
+  padding: 0 6px;
+  background: #b3261e;
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.6;
+  vertical-align: middle;
+}
+.f-input {
+  width: 100%;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid var(--line);
+  font-family: inherit;
+  font-size: 1rem;
+}
+.f-input:focus { outline: 2px solid var(--navy); outline-offset: -1px; }
+.f-input:disabled { background: #f7f5f0; }
+.f-check { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+.f-check input { width: 20px; height: 20px; }
+
+/* 見出し・区切り線・説明文・空白・枠 */
+.f-heading-box { padding-top: 12px; }
+.f-heading { margin: 0 0 4px; padding-bottom: 6px; border-bottom: 2px solid var(--line); font-size: 1.2rem; }
+.f-divider { display: flex; align-items: center; gap: 12px; min-height: 24px; color: #666; font-size: 0.9rem; }
+.f-divider::before, .f-divider::after { content: ""; flex: 1; border-top: 1px solid #b9b0a1; }
+.f-divider:empty::after { display: none; }
+.f-note { white-space: pre-wrap; }
+.f-note.is-bold { font-weight: 700; }
+.f-note.is-warning { padding: 10px 14px; border-left: 4px solid #b3261e; background: #fbeeed; color: #8c1d18; font-weight: 700; }
+.f-spacer { min-height: 1px; }
+.f-group {
+  min-width: 0;
+  padding: 12px 16px 16px;
+  background: #fcfbf8;
+  border: 2px solid var(--navy);
+}
+.f-group > legend { padding: 0 8px; color: var(--navy); font-family: var(--serif); font-weight: 700; font-size: 1.1rem; }
+
+/* 表 */
+.table-wrap { overflow-x: auto; }
+.f-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.f-table th, .f-table td { padding: 6px; font-size: 0.95rem; }
+.f-table thead th { font-size: 0.85rem; }
+.f-table .f-input { min-width: 0; padding: 8px; }
+.f-rowlabel { background: #f6f2ea; font-weight: 700; white-space: nowrap; }
+.f-sum th, .f-sum td { background: #f6f2ea; font-weight: 700; text-align: right; }
+.f-sum th { text-align: left; }
+.row-button {
+  margin-top: 8px;
+  padding: 6px 14px;
+  background: #fff;
+  border: 1px solid var(--navy);
+  color: var(--navy);
+  font-family: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.row-remove {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: #fff;
+  border: 1px solid var(--line);
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+
+/* スマホなど幅の狭い画面では縦1列にする（空白は詰める） */
+@media screen and (max-width: 640px) {
+  .fgrid > *, .fgrid > .is-new-row { grid-column: 1 / -1; }
+  .fgrid > .f-spacer { display: none; }
+  .f-table { table-layout: auto; }
+  .f-table .f-input { min-width: 7em; }
+}

@@ -79,7 +79,11 @@ B64_RE = re.compile(r"^[A-Za-z0-9+/]+={0,2}$")
 
 # 入力ページの項目の種類（表の列に使えるのは COLUMN_TYPES だけ）
 FIELD_TYPES = {"heading", "text", "textarea", "number", "date", "select", "checkbox",
-               "tel", "email", "zip", "mynumber", "table"}
+               "tel", "email", "zip", "mynumber", "table", "divider", "note", "spacer", "group"}
+# 入力欄のない部品（見出し・区切り線・説明文・空白・枠）
+LAYOUT_TYPES = {"heading", "divider", "note", "spacer", "group"}
+NOTE_STYLES = {"normal", "bold", "warning"}
+MAX_FIELDS = 300
 COLUMN_TYPES = {"text", "number", "date", "mynumber"}
 
 log = logging.getLogger("upload")
@@ -394,52 +398,103 @@ def text(value, limit, name, required=False):
     return value.strip()
 
 
-def check_field(f, ids):
+def check_int(value, low, high, default, message):
+    if value is None:
+        return default
+    if not isinstance(value, int) or isinstance(value, bool) or not low <= value <= high:
+        raise UploadError(400, message)
+    return value
+
+
+def check_field(f, ids, in_group=False):
     if not isinstance(f, dict):
         raise UploadError(400, "項目の形式が正しくありません。")
     fid = f.get("id")
     if not isinstance(fid, str) or not FIELD_ID_RE.match(fid) or fid in ids:
         raise UploadError(400, "項目の番号が正しくありません。")
     ids.add(fid)
+    if len(ids) > MAX_FIELDS:
+        raise UploadError(400, f"項目は{MAX_FIELDS}個までです。")
     ftype = f.get("type")
     if ftype not in FIELD_TYPES:
         raise UploadError(400, "項目の種類が正しくありません。")
+    # 区切り線・空白・枠は名前がなくてもよい。説明文は本文を label に入れる
+    label_required = ftype not in ("divider", "spacer", "group")
     field = {
         "id": fid,
         "type": ftype,
-        "label": text(f.get("label"), 200, "項目名", required=True),
+        "label": text(f.get("label", ""), 2000 if ftype == "note" else 200,
+                      "説明文" if ftype == "note" else "項目名", required=label_required),
         "help": text(f.get("help", ""), 500, "説明"),
-        "required": f.get("required") is True and ftype != "heading",
+        "required": f.get("required") is True and ftype not in LAYOUT_TYPES,
+        # 横12マスのうち何マス使うか。newRow なら行の頭から置く
+        "width": check_int(f.get("width"), 1, 12, 12, "項目の幅は1〜12マスで指定してください。"),
+        "newRow": f.get("newRow") is True,
     }
+    if ftype == "note":
+        field["style"] = f.get("style") if f.get("style") in NOTE_STYLES else "normal"
+    if ftype == "group":
+        if in_group:
+            raise UploadError(400, "枠の中に枠は置けません。")
+        children = f.get("children", [])
+        if not isinstance(children, list):
+            raise UploadError(400, "枠の中の項目の形式が正しくありません。")
+        field["children"] = [check_field(c, ids, in_group=True) for c in children]
     if ftype == "select":
         options = f.get("options")
         if not isinstance(options, list) or not 1 <= len(options) <= 100:
             raise UploadError(400, f"「{field['label']}」の選択肢を1〜100個で入力してください。")
         field["options"] = [text(o, 100, "選択肢", required=True) for o in options]
     if ftype == "table":
-        columns = f.get("columns")
-        if not isinstance(columns, list) or not 1 <= len(columns) <= 20:
-            raise UploadError(400, f"「{field['label']}」の列を1〜20個で入力してください。")
-        col_ids = set()
-        field["columns"] = []
-        for c in columns:
-            if not isinstance(c, dict) or c.get("type") not in COLUMN_TYPES:
-                raise UploadError(400, "表の列の種類が正しくありません。")
-            cid = c.get("id")
-            if not isinstance(cid, str) or not FIELD_ID_RE.match(cid) or cid in col_ids:
-                raise UploadError(400, "表の列の番号が正しくありません。")
-            col_ids.add(cid)
-            field["columns"].append({"id": cid, "type": c["type"], "label": text(c.get("label"), 100, "列名", required=True)})
-        rows = f.get("maxRows")
-        if not isinstance(rows, int) or isinstance(rows, bool) or not 1 <= rows <= 50:
-            raise UploadError(400, f"「{field['label']}」の行数は1〜50で入力してください。")
-        field["maxRows"] = rows
+        check_table(f, field)
     return field
+
+
+def check_table(f, field):
+    columns = f.get("columns")
+    if not isinstance(columns, list) or not 1 <= len(columns) <= 20:
+        raise UploadError(400, f"「{field['label']}」の列を1〜20個で入力してください。")
+    col_ids = set()
+    field["columns"] = []
+    for c in columns:
+        if not isinstance(c, dict) or c.get("type") not in COLUMN_TYPES:
+            raise UploadError(400, "表の列の種類が正しくありません。")
+        cid = c.get("id")
+        if not isinstance(cid, str) or not FIELD_ID_RE.match(cid) or cid in col_ids:
+            raise UploadError(400, "表の列の番号が正しくありません。")
+        col_ids.add(cid)
+        field["columns"].append({
+            "id": cid,
+            "type": c["type"],
+            "label": text(c.get("label"), 100, "列名", required=True),
+            # 列の幅（ほかの列との比。1〜10）
+            "width": check_int(c.get("width"), 1, 10, 1, "列の幅は1〜10で指定してください。"),
+            # 数字の列だけ、表の下に合計を出せる
+            "sum": c.get("sum") is True and c["type"] == "number",
+        })
+    # 行の名前（例：1月〜12月）があれば、行数が決まった表にする
+    row_labels = f.get("rowLabels")
+    if row_labels:
+        if not isinstance(row_labels, list) or len(row_labels) > 50:
+            raise UploadError(400, f"「{field['label']}」の行の名前は50行までです。")
+        field["rowLabels"] = [text(r, 100, "行の名前", required=True) for r in row_labels]
+        field["maxRows"] = len(field["rowLabels"])
+    else:
+        field["maxRows"] = check_int(f.get("maxRows"), 1, 50, None, f"「{field['label']}」の行数は1〜50で入力してください。")
+        if field["maxRows"] is None:
+            raise UploadError(400, f"「{field['label']}」の行数は1〜50で入力してください。")
+
+
+def iter_fields(fields):
+    """枠の中の項目も含めて、すべての項目を順に返す"""
+    for f in fields:
+        yield f
+        yield from f.get("children", [])
 
 
 def has_mynumber(fields):
     return any(f["type"] == "mynumber" or any(c["type"] == "mynumber" for c in f.get("columns", []))
-               for f in fields)
+               for f in iter_fields(fields))
 
 
 def check_form(form):
@@ -447,11 +502,11 @@ def check_form(form):
     if not isinstance(form, dict):
         raise UploadError(400, "入力ページの形式が正しくありません。")
     fields = form.get("fields")
-    if not isinstance(fields, list) or not 1 <= len(fields) <= 200:
-        raise UploadError(400, "項目を1〜200個で作ってください。")
+    if not isinstance(fields, list) or not 1 <= len(fields) <= MAX_FIELDS:
+        raise UploadError(400, f"項目を1〜{MAX_FIELDS}個で作ってください。")
     ids = set()
     fields = [check_field(f, ids) for f in fields]
-    if all(f["type"] == "heading" for f in fields):
+    if all(f["type"] in LAYOUT_TYPES for f in iter_fields(fields)):
         raise UploadError(400, "入力する項目を1つ以上作ってください。")
     encrypt = form.get("encrypt") is not False
     if not encrypt and has_mynumber(fields):
@@ -487,7 +542,7 @@ def check_answers(form, answers):
     """暗号化しない入力ページの入力内容を確かめる（項目にない値や大きすぎる値は受け付けない）"""
     if not isinstance(answers, dict):
         raise UploadError(400, "送信内容の形式が正しくありません。")
-    fields = {f["id"]: f for f in form["fields"] if f["type"] != "heading"}
+    fields = {f["id"]: f for f in iter_fields(form["fields"]) if f["type"] not in LAYOUT_TYPES}
     for key, value in answers.items():
         f = fields.get(key)
         if f is None:

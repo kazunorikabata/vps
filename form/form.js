@@ -1,16 +1,8 @@
 // 顧問先の入力ページ
 // 項目は事務所内ページで作ったものを読み込んで表示する。暗号化する入力ページでは、
 // 入力内容をこの画面の中で事務所の公開鍵で暗号化してから送る（VPS には読めない形でしか届かない）
+// 項目の並べ方（マス目）と部品の表示は render.js（事務所内ページと共通）
 const NETWORK_ERROR = '通信できませんでした。電波の良い場所で再度お試しください';
-const TYPE_INPUTS = {
-  text: { type: 'text' },
-  number: { type: 'text', inputMode: 'decimal' },
-  date: { type: 'date' },
-  tel: { type: 'tel', autocomplete: 'tel' },
-  email: { type: 'email', autocomplete: 'email' },
-  zip: { type: 'text', inputMode: 'numeric', placeholder: '例：273-0021', autocomplete: 'postal-code' },
-  mynumber: { type: 'text', inputMode: 'numeric', maxLength: 14, placeholder: '12桁の数字', autocomplete: 'off' },
-};
 
 const token = location.hash.slice(1);
 const form = document.getElementById('entry-form');
@@ -39,7 +31,7 @@ async function start() {
   document.getElementById('title').textContent = page.title;
   document.getElementById('description').textContent = page.description;
   document.getElementById('secure-note').hidden = !page.encrypt;
-  controls = page.fields.map(createField);
+  controls = FormRender.buildForm(fieldsBox, page.fields);
   document.getElementById('loading').hidden = true;
   form.hidden = false;
 }
@@ -82,144 +74,12 @@ form.addEventListener('submit', async (event) => {
 
 document.getElementById('print').addEventListener('click', () => window.print());
 
-// --- 項目の表示 ---
-
-function createField(field) {
-  if (field.type === 'heading') {
-    const h = document.createElement('h2');
-    h.className = 'entry-heading';
-    h.textContent = field.label;
-    fieldsBox.append(h);
-    if (field.help) fieldsBox.append(helpText(field.help));
-    return { field };
-  }
-  const box = document.createElement('div');
-  box.className = 'entry-field';
-  const id = `field-${field.id}`;
-  const label = document.createElement(field.type === 'table' ? 'p' : 'label');
-  label.className = 'entry-label';
-  if (field.type !== 'table') label.htmlFor = id;
-  label.textContent = field.label;
-  if (field.required) label.append(' ', requiredMark());
-  box.append(label);
-  if (field.help) box.append(helpText(field.help));
-  const error = document.createElement('p');
-  error.className = 'entry-error';
-  error.hidden = true;
-
-  let control;
-  if (field.type === 'table') {
-    control = createTable(field, box);
-  } else {
-    const input = createInput(field, id);
-    box.append(input);
-    control = { field, input };
-  }
-  box.append(error);
-  fieldsBox.append(box);
-  return { ...control, box, error };
-}
-
-function createInput(field, id) {
-  let input;
-  if (field.type === 'textarea') {
-    input = document.createElement('textarea');
-    input.rows = 4;
-  } else if (field.type === 'select') {
-    input = document.createElement('select');
-    input.append(new Option('選択してください', ''));
-    for (const option of field.options) input.append(new Option(option, option));
-  } else if (field.type === 'checkbox') {
-    const wrap = document.createElement('label');
-    wrap.className = 'entry-check';
-    input = document.createElement('input');
-    input.type = 'checkbox';
-    input.id = id;
-    wrap.append(input, ' はい');
-    wrap.input = input;
-    return wrap;
-  } else {
-    input = document.createElement('input');
-    Object.assign(input, TYPE_INPUTS[field.type] || TYPE_INPUTS.text);
-  }
-  input.id = id;
-  input.className = 'entry-input';
-  return input;
-}
-
-function createTable(field, box) {
-  const wrap = document.createElement('div');
-  wrap.className = 'table-wrap';
-  const table = document.createElement('table');
-  table.className = 'entry-table';
-  const head = table.createTHead().insertRow();
-  for (const col of field.columns) {
-    const th = document.createElement('th');
-    th.textContent = col.label;
-    head.append(th);
-  }
-  head.append(document.createElement('th'));
-  const body = table.createTBody();
-  wrap.append(table);
-  const add = document.createElement('button');
-  add.type = 'button';
-  add.className = 'row-button';
-  add.textContent = '＋ 行を追加';
-  const control = { field, body, add };
-  add.addEventListener('click', () => addRow(control));
-  box.append(wrap, add);
-  addRow(control);
-  return control;
-}
-
-function addRow(control) {
-  const { field, body, add } = control;
-  const tr = body.insertRow();
-  for (const col of field.columns) {
-    const td = tr.insertCell();
-    const input = document.createElement('input');
-    Object.assign(input, TYPE_INPUTS[col.type] || TYPE_INPUTS.text);
-    input.className = 'entry-input';
-    input.dataset.col = col.id;
-    input.setAttribute('aria-label', col.label);
-    td.append(input);
-  }
-  const td = tr.insertCell();
-  const remove = document.createElement('button');
-  remove.type = 'button';
-  remove.className = 'row-remove';
-  remove.textContent = '×';
-  remove.setAttribute('aria-label', 'この行を削除');
-  remove.addEventListener('click', () => {
-    tr.remove();
-    if (body.rows.length === 0) addRow(control);
-    add.hidden = body.rows.length >= field.maxRows;
-  });
-  td.append(remove);
-  add.hidden = body.rows.length >= field.maxRows;
-}
-
-function helpText(text) {
-  const p = document.createElement('p');
-  p.className = 'entry-help';
-  p.textContent = text;
-  return p;
-}
-
-function requiredMark() {
-  const span = document.createElement('span');
-  span.className = 'required-mark';
-  span.textContent = '必須';
-  return span;
-}
-
 // --- 入力内容の取りまとめと確認 ---
 
 function collect() {
   const answers = {};
   let first = null;
   for (const c of controls) {
-    if (c.field.type === 'heading') continue;
     const value = c.field.type === 'table' ? tableValue(c) : inputValue(c);
     const message = check(c.field, value);
     c.error.textContent = message;
@@ -237,26 +97,18 @@ function collect() {
 }
 
 function inputValue(c) {
-  if (c.field.type === 'checkbox') return c.input.input.checked;
+  if (c.field.type === 'checkbox') return c.input.checkbox.checked;
   const value = normalize(c.field.type, c.input.value);
   if (c.input.tagName !== 'SELECT') c.input.value = value;
   return value;
 }
 
 function tableValue(c) {
-  const rows = [];
-  for (const tr of c.body.rows) {
-    const row = {};
-    let filled = false;
-    for (const input of tr.querySelectorAll('input[data-col]')) {
-      const col = c.field.columns.find((x) => x.id === input.dataset.col);
-      input.value = normalize(col.type, input.value);
-      row[col.id] = input.value;
-      if (input.value) filled = true;
-    }
-    if (filled) rows.push(row);
+  for (const input of c.body.querySelectorAll('input[data-col]')) {
+    const col = c.field.columns.find((x) => x.id === input.dataset.col);
+    input.value = normalize(col.type, input.value);
   }
-  return rows;
+  return FormRender.tableRows(c);
 }
 
 // 全角の数字や記号を半角にし、前後の空白を取る
@@ -276,7 +128,8 @@ function check(field, value) {
     for (const [i, row] of value.entries()) {
       for (const col of field.columns) {
         const message = checkValue(col.type, row[col.id]);
-        if (message) return `${i + 1}行目の「${col.label}」：${message}`;
+        const rowName = field.rowLabels ? field.rowLabels[i] : `${i + 1}行目`;
+        if (message) return `${rowName}の「${col.label}」：${message}`;
       }
     }
     return '';
@@ -320,13 +173,14 @@ function showFormError(text) {
 function showDone(answers, submitted) {
   buildPrintView(answers, submitted);
   form.hidden = true;
-  const hasMyNumber = page.fields.some((f) => f.type === 'mynumber'
+  const hasMyNumber = [...FormRender.iterFields(page.fields)].some((f) => f.type === 'mynumber'
     || (f.columns || []).some((c) => c.type === 'mynumber'));
   document.getElementById('done-mynumber').hidden = !hasMyNumber;
   document.getElementById('done').hidden = false;
   window.scrollTo({ top: 0 });
 }
 
+// PDF（印刷）用：入力画面と同じ並びで、入力した内容を表示する
 function buildPrintView(answers, submitted) {
   const view = document.getElementById('print-view');
   const h = document.createElement('h1');
@@ -334,43 +188,9 @@ function buildPrintView(answers, submitted) {
   const meta = document.createElement('p');
   meta.className = 'print-meta';
   meta.textContent = `送信日時：${new Date(submitted).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}　送信先：蒲田和紀税理士事務所`;
-  const table = document.createElement('table');
-  for (const field of page.fields) {
-    const tr = table.insertRow();
-    if (field.type === 'heading') {
-      const th = document.createElement('th');
-      th.colSpan = 2;
-      th.className = 'print-heading';
-      th.textContent = field.label;
-      tr.append(th);
-      continue;
-    }
-    const th = document.createElement('th');
-    th.textContent = field.label;
-    const td = tr.insertCell();
-    tr.prepend(th);
-    const value = answers[field.id];
-    if (field.type === 'table') td.append(printTable(field, value));
-    else if (field.type === 'checkbox') td.textContent = value ? 'はい' : '—';
-    else td.textContent = value || '—';
-  }
-  view.replaceChildren(h, meta, table);
-}
-
-function printTable(field, rows) {
-  if (!rows.length) return document.createTextNode('—');
-  const table = document.createElement('table');
-  const head = table.insertRow();
-  for (const col of field.columns) {
-    const th = document.createElement('th');
-    th.textContent = col.label;
-    head.append(th);
-  }
-  for (const row of rows) {
-    const tr = table.insertRow();
-    for (const col of field.columns) tr.insertCell().textContent = row[col.id] || '';
-  }
-  return table;
+  const grid = document.createElement('div');
+  FormRender.buildView(grid, page.fields, answers);
+  view.replaceChildren(h, meta, grid);
 }
 
 async function api(path, body) {

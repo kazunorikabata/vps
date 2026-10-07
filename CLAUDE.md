@@ -22,6 +22,7 @@
   - 入力内容は顧問先のブラウザで事務所の公開鍵により暗号化し（`form/crypto.js`。RSA-OAEP 4096 + AES-GCM）、`/api/form/` → `127.0.0.1:8081/form/` を通って顧問先のドライブのフォルダに JSON で保存する。VPS に入力内容は残さない
   - 秘密鍵は職員のブラウザで作り、パスワードで暗号化したファイルとして職員が保管する。VPS・ドライブ・リポジトリに置かない。復号は `staff/forms.html` の中だけで行う
   - 入力ページごとに暗号化を外せるが、マイナンバーの項目があるものは外せない（サーバーでも確認）
+  - 部品は横12マスのマス目に幅（`width`）で並べる（区切り線・説明文・空白・枠、行が決まった表・合計・列幅も）。表示は `form/render.js` と `form/layout.css` を顧問先の画面・PDF・事務所内ページで共通に使い、作成画面は `staff/form-editor.js`
   - VPS 上の配置：入力ページの定義 `forms.json`、URLの対応表 `form-requests.json`、公開鍵 `public-key.json`（いずれも `/var/lib/kabaoffice-upload/`）
 - 管理ページの Claude Code 会話一覧：`staff/claude.js`。dev の crontab で `app/claude_sessions.py` を毎分実行し、`/var/www/kabaoffice/staff/claude-sessions.json` に書き出す（会話の中身は書き出さず、日時と最初の依頼の冒頭だけ）。ブラウザから VPS のプログラムを起動する機能は作らない
 

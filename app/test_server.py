@@ -432,6 +432,65 @@ class FormTest(unittest.TestCase):
             self.assertEqual(self.staff("/forms/save", {"form": form})[0], 400, form["fields"])
         self.assertEqual(self.staff("/forms/save", {"id": "f123456789abc", "form": self.form()})[0], 404)
 
+    def layout_form(self, **kw):
+        return self.form(fields=[
+            {"id": "g1", "type": "group", "label": "ご本人", "children": [
+                {"id": "name", "type": "text", "label": "氏名", "width": 6},
+                {"id": "kana", "type": "text", "label": "フリガナ", "width": 6},
+                {"id": "no", "type": "mynumber", "label": "マイナンバー", "width": 4, "newRow": True},
+            ]},
+            {"id": "d1", "type": "divider"},
+            {"id": "n1", "type": "note", "label": "注意書き", "style": "warning"},
+            {"id": "s1", "type": "spacer", "width": 3},
+            {"id": "monthly", "type": "table", "label": "月別", "rowLabels": ["1月", "2月"], "columns": [
+                {"id": "amount", "type": "number", "label": "金額", "width": 3, "sum": True},
+                {"id": "memo", "type": "text", "label": "メモ", "sum": True},
+            ]},
+        ], **kw)
+
+    def test_layout_save(self):
+        status, data = self.staff("/forms/save", {"form": self.layout_form(encrypt=False)})
+        self.assertEqual(status, 400)   # 枠の中のマイナンバーも暗号化が必要
+        status, data = self.staff("/forms/save", {"form": self.layout_form()})
+        self.assertEqual(status, 200, data)
+        group, divider, note, spacer, table = data["form"]["fields"]
+        self.assertEqual([(c["width"], c["newRow"]) for c in group["children"]], [(6, False), (6, False), (4, True)])
+        self.assertEqual((divider["label"], divider["width"]), ("", 12))
+        self.assertEqual(note["style"], "warning")
+        self.assertEqual(spacer["width"], 3)
+        self.assertEqual(table["maxRows"], 2)
+        self.assertEqual([(c["width"], c["sum"]) for c in table["columns"]], [(3, True), (1, False)])
+
+    def test_layout_rejects(self):
+        nested = self.layout_form()
+        nested["fields"][0]["children"].append({"id": "g2", "type": "group", "children": []})
+        bad = [
+            nested,
+            self.form(fields=[{"id": "a", "type": "text", "label": "x", "width": 13}]),
+            self.form(fields=[{"id": "a", "type": "text", "label": "x", "width": 0}]),
+            self.form(fields=[{"id": "a", "type": "note", "label": ""}, {"id": "b", "type": "text", "label": "x"}]),
+            self.form(fields=[{"id": "d", "type": "divider"}, {"id": "g", "type": "group", "children": []}]),
+            self.form(fields=[{"id": "a", "type": "table", "label": "x", "rowLabels": ["1月", ""],
+                               "columns": [{"id": "c", "type": "text", "label": "c"}]}]),
+            self.form(fields=[{"id": "a", "type": "table", "label": "x", "maxRows": 3,
+                               "columns": [{"id": "c", "type": "text", "label": "c", "width": 11}]}]),
+        ]
+        # 同じ番号は枠の内外で重ねられない
+        dup = self.layout_form()
+        dup["fields"][0]["children"][0]["id"] = "monthly"
+        bad.append(dup)
+        for form in bad:
+            self.assertEqual(self.staff("/forms/save", {"form": form})[0], 400, form["fields"])
+
+    def test_layout_answers(self):
+        form = self.layout_form()
+        form["fields"][0]["children"].pop()   # マイナンバーを外して暗号化なしで試す
+        _, token = self.make_request(encrypt=False, fields=form["fields"])
+        answers = {"name": "ダミー", "monthly": [{"amount": "100", "memo": ""}, {"amount": "", "memo": ""}]}
+        self.assertEqual(self.post("/form/submit", {"token": token, "answers": answers})[0], 200)
+        for bad in ({"g1": "x"}, {"n1": "x"}, {"monthly": [{}, {}, {}]}):
+            self.assertEqual(self.post("/form/submit", {"token": token, "answers": bad})[0], 400, bad)
+
     def test_key_set(self):
         status, data = self.staff("/key/set", {"spki": self.SPKI})
         self.assertEqual(status, 200)
