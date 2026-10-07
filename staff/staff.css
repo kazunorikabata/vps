@@ -3,6 +3,9 @@
 .staff { max-width: 860px; }
 .staff.is-busy { cursor: progress; }
 
+.staff-header-right { display: flex; align-items: center; gap: 16px; }
+.staff-home-link { color: var(--navy); font-size: 0.9rem; }
+
 .staff-badge {
   padding: 2px 10px;
   background: var(--navy);
