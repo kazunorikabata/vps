@@ -712,6 +712,8 @@ function showMessage(text, kind) {
   message.textContent = text;
   message.className = `staff-message is-${kind}`;
   message.hidden = false;
+  // ページの下の方で操作したときも、エラーに気づけるようにする
+  if (kind === 'error') message.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 function api(path, body = {}) {
