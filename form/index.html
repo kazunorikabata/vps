@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; form-action 'none'; base-uri 'none'; object-src 'none'">
+  <title>ご入力のお願い｜蒲田和紀税理士事務所</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&family=Noto+Serif+JP:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="/form/form.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container header-inner">
+      <a href="/" class="logo">蒲田和紀税理士事務所</a>
+    </div>
+  </header>
+
+  <main class="section">
+    <div class="container entry">
+      <h1 id="title" class="section-title">ご入力のお願い</h1>
+
+      <p id="loading" class="entry-message">読み込んでいます…</p>
+      <p id="invalid" class="entry-message is-error" hidden></p>
+
+      <form id="entry-form" novalidate hidden>
+        <p id="description" class="entry-description"></p>
+        <p id="secure-note" class="entry-note" hidden>入力内容はこの画面の中で暗号化してから送信します。事務所以外の人は読めません。</p>
+        <p class="entry-note"><span class="required-mark">必須</span> の項目は必ず入力してください。</p>
+        <div id="fields"></div>
+        <p id="form-error" class="entry-error" role="alert" hidden></p>
+        <button type="submit" id="send" class="send-button">送信する</button>
+      </form>
+
+      <div id="done" class="entry-message" hidden>
+        <p><strong>送信が完了しました。ありがとうございました。</strong></p>
+        <p>入力した内容は、このページを閉じると表示できなくなります。控えが必要な場合は、PDFで保存してください。</p>
+        <p id="done-mynumber" class="entry-warning" hidden>PDFにはマイナンバーが含まれます。保存したファイルは大切に保管し、メールなどで送らないでください。</p>
+        <button type="button" id="print" class="send-button">入力内容をPDFで保存</button>
+        <p class="entry-note">「印刷」の画面が開きます。送信先（プリンター）で「PDFに保存」を選んでください。</p>
+      </div>
+
+      <section id="print-view" class="print-view" aria-hidden="true"></section>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p>蒲田和紀税理士事務所</p>
+      <p>〒273-0021 千葉県船橋市海神3-2-15</p>
+      <p><small>&copy; 蒲田和紀税理士事務所</small></p>
+    </div>
+  </footer>
+
+  <script src="/form/crypto.js"></script>
+  <script src="/form/form.js"></script>
+</body>
+</html>

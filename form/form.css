@@ -1,0 +1,112 @@
+[hidden] { display: none !important; }
+
+.entry { max-width: 720px; }
+.entry-description { white-space: pre-wrap; }
+.entry-note { color: #666; font-size: 0.9rem; }
+.entry-warning { color: #b3261e; font-weight: 700; }
+
+.entry-message {
+  padding: 24px 20px;
+  background: #fff;
+  border: 1px solid var(--line);
+}
+.entry-message.is-error { color: #b3261e; text-align: center; }
+
+.entry-heading {
+  margin: 36px 0 12px;
+  padding-bottom: 6px;
+  border-bottom: 2px solid var(--line);
+  font-size: 1.2rem;
+}
+
+.entry-field {
+  margin-bottom: 16px;
+  padding: 16px;
+  background: #fff;
+  border: 1px solid var(--line);
+}
+.entry-field.has-error { border-color: #b3261e; }
+.entry-label { display: block; margin: 0 0 6px; font-weight: 700; }
+.entry-help { margin: 0 0 8px; color: #666; font-size: 0.9rem; white-space: pre-wrap; }
+.entry-error { margin: 8px 0 0; color: #b3261e; font-size: 0.9rem; font-weight: 700; }
+.required-mark {
+  display: inline-block;
+  padding: 0 6px;
+  background: #b3261e;
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.6;
+  vertical-align: middle;
+}
+
+.entry-input {
+  width: 100%;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid var(--line);
+  font-family: inherit;
+  font-size: 1rem;
+}
+.entry-input:focus { outline: 2px solid var(--navy); outline-offset: -1px; }
+.entry-check { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+.entry-check input { width: 20px; height: 20px; }
+
+/* 表の項目（扶養家族など） */
+.table-wrap { overflow-x: auto; }
+.entry-table { width: 100%; border-collapse: collapse; }
+.entry-table th, .entry-table td { padding: 6px; }
+.entry-table th { font-size: 0.85rem; }
+.entry-table .entry-input { min-width: 8em; padding: 8px; }
+.row-button {
+  margin-top: 8px;
+  padding: 6px 14px;
+  background: #fff;
+  border: 1px solid var(--navy);
+  color: var(--navy);
+  font-family: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.row-remove {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: #fff;
+  border: 1px solid var(--line);
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+
+.send-button {
+  display: block;
+  width: 100%;
+  margin-top: 24px;
+  padding: 14px;
+  background: var(--navy);
+  border: 0;
+  color: #fff;
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.send-button:disabled { background: #9aa5b4; cursor: progress; }
+
+/* PDF（印刷）用。画面には出さない */
+.print-view { display: none; }
+
+@media print {
+  .site-header, .site-footer, .section-title, #done, #entry-form { display: none !important; }
+  .section { padding: 0; }
+  body { background: #fff; font-size: 11pt; }
+  .print-view { display: block; }
+  .print-view h1 { margin: 0 0 4px; font-size: 16pt; }
+  .print-meta { margin: 0 0 12px; font-size: 9pt; }
+  .print-view table { width: 100%; border-collapse: collapse; }
+  .print-view th, .print-view td { padding: 4px 8px; border: 1px solid #999; vertical-align: top; }
+  .print-view th { width: 30%; white-space: normal; background: #f3f3f3; }
+  .print-view td table th { width: auto; }
+  .print-view .print-heading { width: auto; background: #e3e3e3; }
+  .print-view tr { break-inside: avoid; }
+}

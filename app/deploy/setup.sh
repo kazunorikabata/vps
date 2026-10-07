@@ -63,7 +63,7 @@ systemctl daemon-reload
 systemctl enable kabaoffice-upload
 systemctl restart kabaoffice-upload
 
-echo "== 7. nginx に /api/upload/・/staff/・/api/staff/ の設定を入れる"
+echo "== 7. nginx に /api/upload/・/api/form/・/staff/・/api/staff/ の設定を入れる"
 chown root:www-data "$STAFF_HTPASSWD"
 chmod 640 "$STAFF_HTPASSWD"
 [ -e "$NGINX_SNIPPET" ] && cp "$NGINX_SNIPPET" "$SNIPPET_BACKUP"

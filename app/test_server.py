@@ -2,6 +2,9 @@
 
 実行: cd app && python -m unittest test_server
 """
+import base64
+import email
+import hashlib
 import http.client
 import json
 import os
@@ -276,6 +279,277 @@ class StaffTest(unittest.TestCase):
                 clients_admin.main(["add", "C001"])
             clients_admin.main(["remove", "C001"])
         self.assertEqual(self.clients(), {})
+
+
+class DriveRequestTest(unittest.TestCase):
+    """ドライブへの送信内容（通信はダミー）"""
+
+    def setUp(self):
+        p = mock.patch.object(server, "auth_headers", return_value={"Authorization": "Bearer dummy"})
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_create_json_file(self):
+        res = mock.Mock(**{"json.return_value": {"id": "new123"}})
+        with mock.patch.object(server.requests, "post", return_value=res) as post:
+            self.assertEqual(server.create_json_file("folder1", "a.json", {"x": "値"}, {"kabaForm": "f1"}), "new123")
+        kw = post.call_args.kwargs
+        self.assertEqual(kw["params"]["uploadType"], "multipart")
+        msg = email.message_from_bytes(
+            f"Content-Type: {kw['headers']['Content-Type']}\r\n\r\n".encode() + kw["data"])
+        meta, content = [json.loads(part.get_payload(decode=True)) for part in msg.get_payload()]
+        self.assertEqual(meta, {"name": "a.json", "parents": ["folder1"], "mimeType": "application/json",
+                                "appProperties": {"kabaForm": "f1"}})
+        self.assertEqual(content, {"x": "値"})
+
+    def test_list_form_files_pages(self):
+        pages = [{"files": [{"id": "a"}], "nextPageToken": "next"}, {"files": [{"id": "b"}]}]
+        res = [mock.Mock(**{"json.return_value": p}) for p in pages]
+        with mock.patch.object(server.requests, "get", side_effect=res) as get:
+            self.assertEqual([f["id"] for f in server.list_form_files("f000000000000")], ["a", "b"])
+        first, second = [c.kwargs["params"] for c in get.call_args_list]
+        self.assertIn("value='f000000000000'", first["q"])
+        self.assertIn("trashed = false", first["q"])
+        self.assertNotIn("pageToken", first)
+        self.assertEqual(second["pageToken"], "next")
+
+
+class FormTest(unittest.TestCase):
+    """入力ページ（事務所内ページでの作成・URLの発行と、顧問先からの送信）"""
+
+    SPKI = base64.b64encode(bytes(range(256)) * 2).decode()
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        for name in ("CLIENTS_FILE", "FORMS_FILE", "REQUESTS_FILE", "KEY_FILE"):
+            p = mock.patch.object(server, name, os.path.join(self.dir.name, name.lower()))
+            p.start()
+            self.addCleanup(p.stop)
+        with open(server.CLIENTS_FILE, "w", encoding="utf-8") as f:
+            json.dump({TOKEN: {"code": "C001", "folder_id": FOLDER}}, f)
+        server._hits.clear()
+        self.drive = {
+            "create_json_file": mock.Mock(return_value="newFile0123"),
+            "list_form_files": mock.Mock(return_value=[]),
+            "download_json": mock.Mock(return_value={"version": 1}),
+            "get_file": mock.Mock(return_value={"id": "file123456", "size": "100",
+                                                "appProperties": {"kabaForm": "f000000000000"}}),
+            "trash_file": mock.Mock(),
+        }
+        for name, m in self.drive.items():
+            p = mock.patch.object(server, name, m)
+            p.start()
+            self.addCleanup(p.stop)
+        self.ports = {}
+        for kind, handler in (("public", server.Handler), ("staff", server.StaffHandler)):
+            httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+            threading.Thread(target=httpd.serve_forever, daemon=True).start()
+            self.addCleanup(httpd.server_close)
+            self.addCleanup(httpd.shutdown)
+            self.ports[kind] = httpd.server_address[1]
+
+    def post(self, path, body, kind="public"):
+        conn = http.client.HTTPConnection("127.0.0.1", self.ports[kind])
+        conn.request("POST", path, json.dumps(body), {"Content-Type": "application/json", "Origin": ORIGIN})
+        res = conn.getresponse()
+        data = json.loads(res.read())
+        conn.close()
+        return res.status, data
+
+    def staff(self, path, body):
+        with self.assertNoLogs("upload", "ERROR"):
+            return self.post(path, body, "staff")
+
+    def form(self, **kw):
+        return {
+            "title": "年末調整の確認",
+            "description": "ダミーの説明",
+            "fields": [
+                {"id": "h1", "type": "heading", "label": "ご本人"},
+                {"id": "name", "type": "text", "label": "氏名", "required": True},
+                {"id": "agree", "type": "checkbox", "label": "確認しました"},
+                {"id": "kind", "type": "select", "label": "区分", "options": ["甲", "乙"]},
+                {"id": "family", "type": "table", "label": "扶養家族", "maxRows": 2, "columns": [
+                    {"id": "name", "type": "text", "label": "氏名"},
+                    {"id": "birth", "type": "date", "label": "生年月日"},
+                ]},
+            ],
+            **kw,
+        }
+
+    def make_request(self, **kw):
+        status, data = self.staff("/forms/save", {"form": self.form(**kw)})
+        self.assertEqual(status, 200, data)
+        form_id = data["form"]["id"]
+        status, data = self.staff("/requests/add", {"formId": form_id, "code": "C001"})
+        self.assertEqual(status, 200, data)
+        return form_id, data["request"]["token"]
+
+    def set_key(self):
+        self.assertEqual(self.staff("/key/set", {"spki": self.SPKI})[0], 200)
+
+    def encrypted(self, key_id=None):
+        return {"keyId": key_id or server.public_key()["fingerprint"], "key": "QUJD", "iv": "QUJD", "data": "QUJD" * 2000}
+
+    # --- 事務所内ページ ---
+
+    def test_save_and_list(self):
+        status, data = self.staff("/forms/save", {"form": self.form()})
+        self.assertEqual(status, 200)
+        form = data["form"]
+        self.assertRegex(form["id"], server.FORM_ID_RE)
+        self.assertTrue(form["encrypt"])   # 指定がなければ暗号化あり
+        self.assertFalse(form["fields"][0]["required"])
+        status, data = self.staff("/forms/save", {"id": form["id"], "form": self.form(title="変更後", encrypt=False)})
+        self.assertEqual(status, 200)
+        status, data = self.staff("/forms/list", {})
+        self.assertEqual([(f["title"], f["encrypt"]) for f in data["forms"]], [("変更後", False)])
+        self.assertIsNone(data["key"])
+
+    def test_mynumber_requires_encryption(self):
+        form = self.form(encrypt=False)
+        form["fields"][4]["columns"].append({"id": "no", "type": "mynumber", "label": "マイナンバー"})
+        self.assertEqual(self.staff("/forms/save", {"form": form})[0], 400)
+        form["encrypt"] = True
+        self.assertEqual(self.staff("/forms/save", {"form": form})[0], 200)
+
+    def test_bad_forms(self):
+        bad = [
+            self.form(title=""),
+            self.form(fields=[]),
+            self.form(fields=[{"id": "h", "type": "heading", "label": "見出しだけ"}]),
+            self.form(fields=[{"id": "a", "type": "script", "label": "x"}]),
+            self.form(fields=[{"id": "a", "type": "text", "label": "x"}, {"id": "a", "type": "text", "label": "y"}]),
+            self.form(fields=[{"id": "A-1", "type": "text", "label": "x"}]),
+            self.form(fields=[{"id": "a", "type": "select", "label": "x", "options": []}]),
+            self.form(fields=[{"id": "a", "type": "table", "label": "x", "maxRows": 0,
+                               "columns": [{"id": "c", "type": "text", "label": "c"}]}]),
+            self.form(fields=[{"id": "a", "type": "table", "label": "x", "maxRows": 3,
+                               "columns": [{"id": "c", "type": "select", "label": "c"}]}]),
+        ]
+        for form in bad:
+            self.assertEqual(self.staff("/forms/save", {"form": form})[0], 400, form["fields"])
+        self.assertEqual(self.staff("/forms/save", {"id": "f123456789abc", "form": self.form()})[0], 404)
+
+    def test_key_set(self):
+        status, data = self.staff("/key/set", {"spki": self.SPKI})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["key"]["fingerprint"], hashlib.sha256(base64.b64decode(self.SPKI)).hexdigest())
+        self.assertEqual(self.staff("/key/set", {"spki": self.SPKI})[0], 409)
+        self.assertEqual(self.staff("/key/set", {"spki": self.SPKI, "replace": True})[0], 200)
+        self.assertEqual(self.staff("/key/set", {"spki": "QUJD", "replace": True})[0], 400)
+        self.assertEqual(self.staff("/key/set", {"spki": "not base64!", "replace": True})[0], 400)
+
+    def test_requests(self):
+        form_id, token = self.make_request()
+        self.assertRegex(token, server.TOKEN_RE)
+        # 同じ顧問先には同じURLを返す
+        self.assertEqual(self.staff("/requests/add", {"formId": form_id, "code": "C001"})[1]["request"]["token"], token)
+        self.assertEqual(self.staff("/requests/add", {"formId": form_id, "code": "C999"})[0], 404)
+        status, data = self.staff("/requests/list", {"formId": form_id})
+        self.assertEqual(data["requests"][0]["url"], server.FORM_BASE_URL + token)
+        status, data = self.staff("/requests/qr", {"token": token})
+        self.assertTrue(data["dataUrl"].startswith("data:image/png;base64,"))
+        self.assertEqual(self.staff("/requests/remove", {"token": token}), (200, {"ok": True}))
+        self.assertEqual(self.post("/form/get", {"token": token})[0], 403)
+
+    def test_remove_form_removes_requests(self):
+        form_id, token = self.make_request(encrypt=False)
+        self.assertEqual(self.staff("/forms/remove", {"id": form_id})[0], 200)
+        self.assertEqual(server.load_json(server.REQUESTS_FILE), {})
+        self.assertEqual(self.post("/form/get", {"token": token})[0], 403)
+
+    def test_submissions(self):
+        self.drive["list_form_files"].return_value = [
+            {"id": "file123456", "createdTime": "2026-10-07T01:00:00Z", "appProperties": {"kabaCode": "C001"}}]
+        status, data = self.staff("/submissions/list", {"formId": "f000000000000"})
+        self.assertEqual(data["submissions"], [{"id": "file123456", "code": "C001", "submitted": "2026-10-07T01:00:00Z"}])
+        self.assertEqual(self.staff("/submissions/get", {"id": "file123456"}), (200, {"record": {"version": 1}}))
+        self.assertEqual(self.staff("/submissions/remove", {"id": "file123456"})[0], 200)
+        self.drive["trash_file"].assert_called_once_with("file123456")
+        # 入力ページ以外のファイル（アップロードされた資料など）は扱わない
+        self.drive["get_file"].return_value = {"id": "file123456", "size": "100"}
+        self.assertEqual(self.staff("/submissions/get", {"id": "file123456"})[0], 404)
+        self.assertEqual(self.staff("/submissions/remove", {"id": "file123456"})[0], 404)
+        self.assertEqual(self.staff("/submissions/get", {"id": "../x"})[0], 400)
+
+    # --- 顧問先の入力ページ ---
+
+    def test_get_encrypted_form(self):
+        form_id, token = self.make_request()
+        self.assertEqual(self.post("/form/get", {"token": token})[0], 503)   # 鍵の登録前
+        self.set_key()
+        status, data = self.post("/form/get", {"token": token})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["publicKey"], self.SPKI)
+        self.assertEqual(data["title"], "年末調整の確認")
+        self.assertNotIn("code", data)
+
+    def test_submit_encrypted(self):
+        form_id, token = self.make_request()
+        self.set_key()
+        status, data = self.post("/form/submit", {"token": token, "encrypted": self.encrypted()})
+        self.assertEqual(status, 200, data)
+        folder, name, record, props = self.drive["create_json_file"].call_args.args
+        self.assertEqual(folder, FOLDER)
+        self.assertRegex(name, r"^\d{8}-\d{6}_年末調整の確認\.json$")
+        self.assertEqual(props, {"kabaForm": form_id, "kabaCode": "C001"})
+        self.assertEqual(record["encrypted"]["data"], "QUJD" * 2000)
+        self.assertNotIn("answers", record)
+        self.assertEqual(len(record["fields"]), 5)
+
+    def test_submit_encrypted_rejects(self):
+        _, token = self.make_request()
+        self.set_key()
+        self.assertEqual(self.post("/form/submit", {"token": token, "encrypted": self.encrypted("0" * 64)})[0], 409)
+        bad = self.encrypted()
+        bad["iv"] = "<script>"
+        self.assertEqual(self.post("/form/submit", {"token": token, "encrypted": bad})[0], 400)
+        # 暗号化する入力ページに、暗号化していない内容は送れない
+        self.assertEqual(self.post("/form/submit", {"token": token, "answers": {"name": "ダミー"}})[0], 400)
+        self.drive["create_json_file"].assert_not_called()
+
+    def test_submit_plain(self):
+        _, token = self.make_request(encrypt=False)
+        answers = {"name": "ダミー太郎", "agree": True, "kind": "甲", "family": [{"name": "ダミー花子", "birth": "2000-01-01"}]}
+        self.assertEqual(self.post("/form/get", {"token": token})[0], 200)   # 鍵がなくても開ける
+        self.assertEqual(self.post("/form/submit", {"token": token, "answers": answers})[0], 200)
+        record = self.drive["create_json_file"].call_args.args[2]
+        self.assertEqual(record["answers"], answers)
+        self.assertNotIn("encrypted", record)
+
+    def test_submit_plain_rejects(self):
+        _, token = self.make_request(encrypt=False)
+        bad = [
+            {"other": "x"},
+            {"h1": "x"},
+            {"agree": "はい"},
+            {"name": "x" * 5001},
+            {"family": [{"name": "a"}, {"name": "b"}, {"name": "c"}]},
+            {"family": [{"other": "a"}]},
+            ["x"],
+        ]
+        for answers in bad:
+            self.assertEqual(self.post("/form/submit", {"token": token, "answers": answers})[0], 400, answers)
+        self.drive["create_json_file"].assert_not_called()
+
+    def test_submit_after_client_removed(self):
+        _, token = self.make_request(encrypt=False)
+        with open(server.CLIENTS_FILE, "w", encoding="utf-8") as f:
+            json.dump({}, f)
+        self.assertEqual(self.post("/form/submit", {"token": token, "answers": {}})[0], 403)
+
+    def test_submit_rate_limit(self):
+        _, token = self.make_request(encrypt=False)
+        with mock.patch.object(server, "RATE_LIMIT", 2):
+            codes = [self.post("/form/submit", {"token": token, "answers": {}})[0] for _ in range(3)]
+        self.assertEqual(codes, [200, 200, 429])
+
+    def test_staff_routes_not_on_public_port(self):
+        for path in ("/forms/list", "/key/set", "/requests/add", "/submissions/get"):
+            self.assertEqual(self.post(path, {})[0], 404, path)
+        self.assertEqual(self.post("/form/get", {}, "staff")[0], 404)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,74 @@
+/* 入力ページの管理 */
+.key-loaded { font-weight: 700; }
+.key-loaded.is-ok { color: #2e6b3a; }
+.key-loaded.is-error { color: #b3261e; }
+.key-warning { color: #b3261e; font-weight: 700; }
+.key-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.key-form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--line);
+}
+.key-form label { display: flex; flex-direction: column; gap: 4px; font-weight: 700; }
+.key-form input[type="password"] { width: 20em; max-width: 100%; padding: 8px 10px; border: 1px solid var(--line); font-size: 1rem; }
+.check-line { display: inline-flex !important; flex-direction: row !important; align-items: center; gap: 8px; font-weight: 400 !important; }
+
+#new-form { margin-bottom: 16px; }
+.tag { display: inline-block; padding: 0 8px; font-size: 0.8rem; border: 1px solid currentColor; }
+.tag.is-on { color: #2e6b3a; }
+.tag.is-off { color: #b3261e; }
+
+/* 編集 */
+.ed-row { margin-bottom: 14px; }
+.ed-row > label { display: block; margin-bottom: 4px; font-weight: 700; }
+.ed-input, .ed-fields input, .ed-fields select, .ed-fields textarea, .ed-add select, #request-code {
+  width: 100%;
+  padding: 8px 10px;
+  background: #fff;
+  border: 1px solid var(--line);
+  font-family: inherit;
+  font-size: 0.95rem;
+}
+.ed-subtitle { margin: 24px 0 8px; font-size: 1.05rem; }
+.ed-fields { margin: 0; padding: 0; list-style: none; counter-reset: field; }
+.ed-field {
+  margin-bottom: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--navy);
+  background: #fcfbf8;
+}
+.ed-field.is-heading { border-left-color: var(--accent); }
+.ed-field-top { display: grid; grid-template-columns: 11em 1fr; gap: 8px; }
+.ed-field-sub { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-top: 8px; }
+.ed-field-sub .check-line { white-space: nowrap; }
+.ed-field-ops { display: flex; gap: 6px; margin-left: auto; }
+.ed-field textarea { margin-top: 8px; }
+.ed-small { font-size: 0.85rem; color: #666; }
+.ed-columns { margin-top: 8px; padding: 8px; border: 1px dashed var(--line); }
+.ed-column { display: grid; grid-template-columns: 1fr 9em auto; gap: 6px; margin-bottom: 6px; }
+.ed-rows { display: inline-flex; align-items: center; gap: 6px; }
+.ed-rows input { width: 5em !important; }
+.ed-add { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 8px; }
+.ed-actions { display: flex; gap: 10px; margin-top: 24px; }
+
+/* 依頼・入力内容 */
+#request-form { margin-bottom: 16px; }
+#request-code { width: 14em; }
+#request-detail { margin-bottom: 16px; }
+#requests-close, #sub-close { margin-top: 16px; }
+.sub-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+.sub-view { margin-top: 20px; padding: 16px; border: 2px solid var(--navy); }
+.sub-view h3 { margin: 0 0 8px; font-size: 1.05rem; }
+.sub-view table { width: 100%; border-collapse: collapse; }
+.sub-view th, .sub-view td { padding: 6px 10px; font-size: 0.9rem; vertical-align: top; }
+.sub-view > table > tbody > tr > th { width: 30%; white-space: normal; }
+.sub-view .print-heading { background: #ebe4d6; }
+
+@media (max-width: 600px) {
+  .ed-field-top, .ed-column { grid-template-columns: 1fr; }
+}

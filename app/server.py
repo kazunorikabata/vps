@@ -6,7 +6,14 @@
 ドライブへは事務所の Google アカウントのログイン情報（google_login.py で保存）で接続し、
 権限は drive.file（このプログラムが作ったフォルダとファイルだけ）に限る。
 事務所内ページ（/staff/）用の顧問先管理は別のポート（nginx の /api/staff/、ベーシック認証付き）で受ける。
+
+入力ページ（/form/）：事務所内ページで作った入力ページに、顧問先が入力して送る。
+入力内容は顧問先のブラウザで事務所の公開鍵を使って暗号化され、ここでは中身を読めないまま
+顧問先のドライブのフォルダに保存する（暗号化しない入力ページも作れるが、マイナンバーを含むものは必ず暗号化）。
+復号は事務所内ページで、職員が持つ秘密鍵で行う。秘密鍵はこのサーバーにもドライブにも置かない。
 """
+import base64
+import hashlib
 import json
 import logging
 import os
@@ -27,14 +34,21 @@ DATA_DIR = os.environ.get("UPLOAD_DATA_DIR", "/var/lib/kabaoffice-upload")    # 
 TOKEN_FILE = os.path.join(CONFIG_DIR, "oauth-token.json")
 CLIENTS_FILE = os.path.join(DATA_DIR, "clients.json")
 ROOT_FILE = os.path.join(DATA_DIR, "root-folder.json")
+FORMS_FILE = os.path.join(DATA_DIR, "forms.json")              # 入力ページの定義（項目の並び。入力内容は置かない）
+REQUESTS_FILE = os.path.join(DATA_DIR, "form-requests.json")   # 入力ページのURLの鍵 → 顧問先と入力ページ
+KEY_FILE = os.path.join(DATA_DIR, "public-key.json")           # 事務所の公開鍵（暗号化用。復号はできない）
 ROOT_NAME = "顧問先資料"
 ALLOWED_ORIGIN = os.environ.get("UPLOAD_ALLOWED_ORIGIN", "https://kabaoffice.com")
 UPLOAD_BASE_URL = ALLOWED_ORIGIN + "/upload/#"
+FORM_BASE_URL = ALLOWED_ORIGIN + "/form/#"
 PORT = int(os.environ.get("UPLOAD_PORT", "8081"))
 STAFF_PORT = int(os.environ.get("UPLOAD_STAFF_PORT", "8082"))
 
 MAX_SIZE = 50 * 1024 * 1024
 MAX_BODY = 4096
+# 既定より大きい本文を受け付ける API（nginx の client_max_body_size もあわせる）
+BODY_LIMITS = {"/form/submit": 256 * 1024, "/forms/save": 64 * 1024, "/key/set": 8192}
+MAX_RECORD = 512 * 1024   # 事務所内ページで開く入力内容のファイルの大きさの上限
 RATE_LIMIT = 60      # 1つのURLから1時間に受け付ける件数
 RATE_WINDOW = 3600
 
@@ -59,6 +73,14 @@ JST = timezone(timedelta(hours=9))
 TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{20,128}$")
 FILE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{10,200}$")
 CODE_RE = re.compile(r"^[A-Za-z0-9_-]{1,20}$")
+FORM_ID_RE = re.compile(r"^f[0-9a-f]{12}$")
+FIELD_ID_RE = re.compile(r"^[a-z0-9_]{1,40}$")
+B64_RE = re.compile(r"^[A-Za-z0-9+/]+={0,2}$")
+
+# 入力ページの項目の種類（表の列に使えるのは COLUMN_TYPES だけ）
+FIELD_TYPES = {"heading", "text", "textarea", "number", "date", "select", "checkbox",
+               "tel", "email", "zip", "mynumber", "table"}
+COLUMN_TYPES = {"text", "number", "date", "mynumber"}
 
 log = logging.getLogger("upload")
 
@@ -176,7 +198,7 @@ def create_upload_session(folder_id, name, mime, size):
 def get_file(file_id):
     r = requests.get(
         f"{DRIVE_API}/{file_id}",
-        params={"fields": "id,name,size,parents", "supportsAllDrives": "true"},
+        params={"fields": "id,name,size,parents,appProperties", "supportsAllDrives": "true"},
         headers=auth_headers(),
         timeout=15,
     )
@@ -208,6 +230,62 @@ def trash_file(file_id):
         timeout=15,
     )
     r.raise_for_status()
+
+
+def create_json_file(folder_id, name, data, app_properties):
+    """小さな JSON ファイルをドライブに作る。appProperties で入力ページごとに探せるようにする"""
+    boundary = secrets.token_hex(16)
+    meta = {"name": name, "parents": [folder_id], "mimeType": "application/json",
+            "appProperties": app_properties}
+    body = (
+        f"--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n"
+        f"{json.dumps(meta, ensure_ascii=False)}\r\n"
+        f"--{boundary}\r\nContent-Type: application/json\r\n\r\n"
+        f"{json.dumps(data, ensure_ascii=False)}\r\n--{boundary}--"
+    ).encode()
+    r = requests.post(
+        DRIVE_UPLOAD_API,
+        params={"uploadType": "multipart", "fields": "id", "supportsAllDrives": "true"},
+        headers={**auth_headers(), "Content-Type": f"multipart/related; boundary={boundary}"},
+        data=body,
+        timeout=30,
+    )
+    r.raise_for_status()
+    return r.json()["id"]
+
+
+def list_form_files(form_id):
+    """入力ページに送られた入力内容のファイルを、新しい順に返す"""
+    files, page = [], None
+    while True:
+        params = {
+            "q": f"appProperties has {{ key='kabaForm' and value='{form_id}' }} and trashed = false",
+            "fields": "nextPageToken, files(id, name, createdTime, appProperties)",
+            "orderBy": "createdTime desc",
+            "pageSize": 1000,
+            "supportsAllDrives": "true",
+            "includeItemsFromAllDrives": "true",
+        }
+        if page:
+            params["pageToken"] = page
+        r = requests.get(DRIVE_API, params=params, headers=auth_headers(), timeout=30)
+        r.raise_for_status()
+        data = r.json()
+        files += data.get("files", [])
+        page = data.get("nextPageToken")
+        if not page:
+            return files
+
+
+def download_json(file_id):
+    r = requests.get(
+        f"{DRIVE_API}/{file_id}",
+        params={"alt": "media", "supportsAllDrives": "true"},
+        headers=auth_headers(),
+        timeout=30,
+    )
+    r.raise_for_status()
+    return r.json()
 
 
 # --- 顧問先の対応表（URLの鍵 → ドライブのフォルダ） ---
@@ -297,6 +375,153 @@ def reissue_client(code):
     return token
 
 
+def find_folder(code):
+    """顧問先の番号から、ドライブのフォルダのIDを返す"""
+    for c in load_json(CLIENTS_FILE).values():
+        if c["code"] == code:
+            return c["folder_id"]
+    return None
+
+
+# --- 入力ページ ---
+
+_forms_lock = threading.Lock()
+
+
+def text(value, limit, name, required=False):
+    if not isinstance(value, str) or len(value) > limit or (required and not value.strip()):
+        raise UploadError(400, f"{name}を確認してください（{limit}文字以内）。")
+    return value.strip()
+
+
+def check_field(f, ids):
+    if not isinstance(f, dict):
+        raise UploadError(400, "項目の形式が正しくありません。")
+    fid = f.get("id")
+    if not isinstance(fid, str) or not FIELD_ID_RE.match(fid) or fid in ids:
+        raise UploadError(400, "項目の番号が正しくありません。")
+    ids.add(fid)
+    ftype = f.get("type")
+    if ftype not in FIELD_TYPES:
+        raise UploadError(400, "項目の種類が正しくありません。")
+    field = {
+        "id": fid,
+        "type": ftype,
+        "label": text(f.get("label"), 200, "項目名", required=True),
+        "help": text(f.get("help", ""), 500, "説明"),
+        "required": f.get("required") is True and ftype != "heading",
+    }
+    if ftype == "select":
+        options = f.get("options")
+        if not isinstance(options, list) or not 1 <= len(options) <= 100:
+            raise UploadError(400, f"「{field['label']}」の選択肢を1〜100個で入力してください。")
+        field["options"] = [text(o, 100, "選択肢", required=True) for o in options]
+    if ftype == "table":
+        columns = f.get("columns")
+        if not isinstance(columns, list) or not 1 <= len(columns) <= 20:
+            raise UploadError(400, f"「{field['label']}」の列を1〜20個で入力してください。")
+        col_ids = set()
+        field["columns"] = []
+        for c in columns:
+            if not isinstance(c, dict) or c.get("type") not in COLUMN_TYPES:
+                raise UploadError(400, "表の列の種類が正しくありません。")
+            cid = c.get("id")
+            if not isinstance(cid, str) or not FIELD_ID_RE.match(cid) or cid in col_ids:
+                raise UploadError(400, "表の列の番号が正しくありません。")
+            col_ids.add(cid)
+            field["columns"].append({"id": cid, "type": c["type"], "label": text(c.get("label"), 100, "列名", required=True)})
+        rows = f.get("maxRows")
+        if not isinstance(rows, int) or isinstance(rows, bool) or not 1 <= rows <= 50:
+            raise UploadError(400, f"「{field['label']}」の行数は1〜50で入力してください。")
+        field["maxRows"] = rows
+    return field
+
+
+def has_mynumber(fields):
+    return any(f["type"] == "mynumber" or any(c["type"] == "mynumber" for c in f.get("columns", []))
+               for f in fields)
+
+
+def check_form(form):
+    """事務所内ページから送られた入力ページの定義を確かめて、保存する形に整える"""
+    if not isinstance(form, dict):
+        raise UploadError(400, "入力ページの形式が正しくありません。")
+    fields = form.get("fields")
+    if not isinstance(fields, list) or not 1 <= len(fields) <= 200:
+        raise UploadError(400, "項目を1〜200個で作ってください。")
+    ids = set()
+    fields = [check_field(f, ids) for f in fields]
+    if all(f["type"] == "heading" for f in fields):
+        raise UploadError(400, "入力する項目を1つ以上作ってください。")
+    encrypt = form.get("encrypt") is not False
+    if not encrypt and has_mynumber(fields):
+        raise UploadError(400, "マイナンバーの項目がある入力ページは、暗号化を外せません。")
+    return {
+        "title": text(form.get("title"), 100, "入力ページの名前", required=True),
+        "description": text(form.get("description", ""), 2000, "説明"),
+        "encrypt": encrypt,
+        "fields": fields,
+    }
+
+
+def check_form_id(form_id):
+    if not isinstance(form_id, str) or not FORM_ID_RE.match(form_id):
+        raise UploadError(400, "入力ページが見つかりません。")
+    return form_id
+
+
+def find_form(forms, form_id):
+    form = forms.get(check_form_id(form_id))
+    if not form:
+        raise UploadError(404, "入力ページが見つかりません。")
+    return form
+
+
+def check_b64(value, limit):
+    if not isinstance(value, str) or not 0 < len(value) <= limit or not B64_RE.match(value):
+        raise UploadError(400, "送信内容の形式が正しくありません。")
+    return value
+
+
+def check_answers(form, answers):
+    """暗号化しない入力ページの入力内容を確かめる（項目にない値や大きすぎる値は受け付けない）"""
+    if not isinstance(answers, dict):
+        raise UploadError(400, "送信内容の形式が正しくありません。")
+    fields = {f["id"]: f for f in form["fields"] if f["type"] != "heading"}
+    for key, value in answers.items():
+        f = fields.get(key)
+        if f is None:
+            raise UploadError(400, "送信内容の形式が正しくありません。")
+        if f["type"] == "checkbox":
+            ok = isinstance(value, bool)
+        elif f["type"] == "table":
+            cols = {c["id"] for c in f["columns"]}
+            ok = isinstance(value, list) and len(value) <= f["maxRows"] and all(
+                isinstance(row, dict) and set(row) <= cols
+                and all(isinstance(v, str) and len(v) <= 500 for v in row.values())
+                for row in value)
+        else:
+            ok = isinstance(value, str) and len(value) <= 5000
+        if not ok:
+            raise UploadError(400, "送信内容の形式が正しくありません。")
+    return answers
+
+
+def find_request(token):
+    if not isinstance(token, str) or not TOKEN_RE.match(token):
+        raise UploadError(403, "このURLは無効です。事務所にお問い合わせください。")
+    req = load_json(REQUESTS_FILE).get(token)
+    form = load_json(FORMS_FILE).get(req["form_id"]) if req else None
+    if not form:
+        raise UploadError(403, "このURLは無効です。事務所にお問い合わせください。")
+    return req, form
+
+
+def public_key():
+    key = load_json(KEY_FILE)
+    return key if key.get("spki") else None
+
+
 # --- API ---
 
 def handle_session(body):
@@ -331,6 +556,59 @@ def handle_complete(body):
         raise UploadError(400, "ファイルの中身を確認できなかったため、受け付けられませんでした。")
     log.info("received code=%s ext=%s size=%d", client["code"], ext, size)
     return {"ok": True}
+
+
+def handle_form_get(body):
+    _, form = find_request(body.get("token"))
+    data = {k: form[k] for k in ("title", "description", "encrypt", "fields")}
+    if form["encrypt"]:
+        key = public_key()
+        if not key:
+            raise UploadError(503, "この入力ページは準備中です。事務所にお問い合わせください。")
+        data["publicKey"] = key["spki"]
+        data["keyId"] = key["fingerprint"]
+    return data
+
+
+def handle_form_submit(body):
+    token = body.get("token")
+    req, form = find_request(token)
+    folder_id = find_folder(req["code"])
+    if not folder_id:
+        raise UploadError(403, "このURLは無効です。事務所にお問い合わせください。")
+    if form["encrypt"]:
+        enc = body.get("encrypted")
+        key = public_key()
+        if not isinstance(enc, dict) or not key:
+            raise UploadError(400, "送信内容の形式が正しくありません。")
+        if enc.get("keyId") != key["fingerprint"]:
+            raise UploadError(409, "ページが古くなっています。ページを読み込み直してから、もう一度入力してください。")
+        content = {"encrypted": {
+            "keyId": key["fingerprint"],
+            "key": check_b64(enc.get("key"), 2048),
+            "iv": check_b64(enc.get("iv"), 64),
+            "data": check_b64(enc.get("data"), 240 * 1024),
+        }}
+    else:
+        content = {"answers": check_answers(form, body.get("answers"))}
+    check_rate(token)
+    now = datetime.now(JST)
+    record = {
+        "version": 1,
+        "formId": req["form_id"],
+        "formTitle": form["title"],
+        "code": req["code"],
+        "submitted": now.isoformat(timespec="seconds"),
+        # あとで入力ページを直しても読めるように、送信時点の項目を残す
+        "fields": form["fields"],
+        **content,
+    }
+    title = re.sub(r'[\x00-\x1f\x7f/\\:*?"<>|]', "_", form["title"])[:60]
+    create_json_file(folder_id, f"{now:%Y%m%d-%H%M%S}_{title}.json", record,
+                     {"kabaForm": req["form_id"], "kabaCode": req["code"]})
+    # 入力内容は記録に残さない
+    log.info("form submitted code=%s form=%s encrypted=%s", req["code"], req["form_id"], form["encrypt"])
+    return {"ok": True, "submitted": record["submitted"]}
 
 
 def client_view(token, client):
@@ -368,7 +646,152 @@ def handle_staff_qr(body):
     return {"dataUrl": qr.png_data_uri(scale=8, border=4)}
 
 
-ROUTES = {"/session": handle_session, "/complete": handle_complete}
+def form_view(form_id, form, requests_count):
+    return {"id": form_id, **form, "requests": requests_count}
+
+
+def handle_forms_list(body):
+    forms = load_json(FORMS_FILE)
+    counts = {}
+    for req in load_json(REQUESTS_FILE).values():
+        counts[req["form_id"]] = counts.get(req["form_id"], 0) + 1
+    items = sorted(forms.items(), key=lambda item: item[1].get("updated", ""), reverse=True)
+    key = public_key()
+    return {
+        "forms": [form_view(i, f, counts.get(i, 0)) for i, f in items],
+        "key": {"fingerprint": key["fingerprint"], "set": key.get("set", "")} if key else None,
+    }
+
+
+def handle_forms_save(body):
+    form = check_form(body.get("form"))
+    today = f"{datetime.now(JST):%Y-%m-%d %H:%M}"
+    with _forms_lock:
+        forms = load_json(FORMS_FILE)
+        form_id = body.get("id")
+        if form_id is None:
+            form_id = "f" + secrets.token_hex(6)
+            form["created"] = today
+        else:
+            form["created"] = find_form(forms, form_id).get("created", today)
+        form["updated"] = today
+        forms[form_id] = form
+        save_json(FORMS_FILE, forms)
+    return {"form": form_view(form_id, form, 0)}
+
+
+def handle_forms_remove(body):
+    """入力ページと、その依頼URLを削除する（送られた入力内容はドライブに残る）"""
+    with _forms_lock:
+        forms = load_json(FORMS_FILE)
+        find_form(forms, body.get("id"))
+        del forms[body["id"]]
+        save_json(FORMS_FILE, forms)
+        reqs = {t: r for t, r in load_json(REQUESTS_FILE).items() if r["form_id"] != body["id"]}
+        save_json(REQUESTS_FILE, reqs)
+    return {"ok": True}
+
+
+def handle_key_set(body):
+    """事務所の公開鍵を登録する。秘密鍵は職員のブラウザで作られ、ここには来ない"""
+    spki = check_b64(body.get("spki"), 2048)
+    der = base64.b64decode(spki)
+    if not 256 <= len(der) <= 1024:
+        raise UploadError(400, "鍵の形式が正しくありません。")
+    with _forms_lock:
+        if public_key() and body.get("replace") is not True:
+            raise UploadError(409, "鍵はすでに登録されています。")
+        key = {"spki": spki, "fingerprint": hashlib.sha256(der).hexdigest(), "set": f"{datetime.now(JST):%Y-%m-%d %H:%M}"}
+        save_json(KEY_FILE, key)
+    return {"key": {"fingerprint": key["fingerprint"], "set": key["set"]}}
+
+
+def request_view(token, req):
+    return {"token": token, "code": req["code"], "created": req.get("created", ""), "url": FORM_BASE_URL + token}
+
+
+def handle_requests_list(body):
+    form_id = check_form_id(body.get("formId"))
+    reqs = [request_view(t, r) for t, r in load_json(REQUESTS_FILE).items() if r["form_id"] == form_id]
+    return {"requests": sorted(reqs, key=lambda r: r["code"])}
+
+
+def handle_requests_add(body):
+    """顧問先に入力ページのURLを発行する（同じ顧問先にはすでにあるURLを返す）"""
+    code = check_code(body.get("code"))
+    with _forms_lock:
+        find_form(load_json(FORMS_FILE), body.get("formId"))
+        if not find_folder(code):
+            raise UploadError(404, f"{code} は登録されていません。")
+        reqs = load_json(REQUESTS_FILE)
+        for t, r in reqs.items():
+            if r["form_id"] == body["formId"] and r["code"] == code:
+                return {"request": request_view(t, r)}
+        token = secrets.token_urlsafe(32)
+        reqs[token] = {"form_id": body["formId"], "code": code, "created": f"{datetime.now(JST):%Y-%m-%d}"}
+        save_json(REQUESTS_FILE, reqs)
+    return {"request": request_view(token, reqs[token])}
+
+
+def find_request_token(token):
+    reqs = load_json(REQUESTS_FILE)
+    if not isinstance(token, str) or token not in reqs:
+        raise UploadError(404, "URLが見つかりません。")
+    return reqs
+
+
+def handle_requests_remove(body):
+    with _forms_lock:
+        reqs = find_request_token(body.get("token"))
+        del reqs[body["token"]]
+        save_json(REQUESTS_FILE, reqs)
+    return {"ok": True}
+
+
+def handle_requests_qr(body):
+    find_request_token(body.get("token"))
+    qr = segno.make(FORM_BASE_URL + body["token"], error="m")
+    return {"dataUrl": qr.png_data_uri(scale=8, border=4)}
+
+
+def handle_submissions_list(body):
+    form_id = check_form_id(body.get("formId"))
+    return {"submissions": [
+        {"id": f["id"], "code": f.get("appProperties", {}).get("kabaCode", ""), "submitted": f.get("createdTime", "")}
+        for f in list_form_files(form_id)
+    ]}
+
+
+def find_submission(file_id):
+    """入力ページから送られたファイルだけを扱う（アップロードされた資料などは開かない）"""
+    if not isinstance(file_id, str) or not FILE_ID_RE.match(file_id):
+        raise UploadError(400, "ファイルが見つかりません。")
+    f = get_file(file_id)
+    if f is None or "kabaForm" not in f.get("appProperties", {}):
+        raise UploadError(404, "ファイルが見つかりません。")
+    return f
+
+
+def handle_submissions_get(body):
+    f = find_submission(body.get("id"))
+    if int(f.get("size", 0)) > MAX_RECORD:
+        raise UploadError(400, "ファイルが大きすぎます。")
+    return {"record": download_json(f["id"])}
+
+
+def handle_submissions_remove(body):
+    """ドライブのゴミ箱に移す（ゴミ箱からは30日後に完全に削除される）"""
+    f = find_submission(body.get("id"))
+    trash_file(f["id"])
+    return {"ok": True}
+
+
+ROUTES = {
+    "/session": handle_session,
+    "/complete": handle_complete,
+    "/form/get": handle_form_get,
+    "/form/submit": handle_form_submit,
+}
 
 # 顧問先用とは別のポートで受ける。顧問先用の入口から管理の機能に届かないようにするため
 STAFF_ROUTES = {
@@ -377,7 +800,21 @@ STAFF_ROUTES = {
     "/clients/remove": handle_staff_remove,
     "/clients/reissue": handle_staff_reissue,
     "/clients/qr": handle_staff_qr,
+    "/forms/list": handle_forms_list,
+    "/forms/save": handle_forms_save,
+    "/forms/remove": handle_forms_remove,
+    "/key/set": handle_key_set,
+    "/requests/list": handle_requests_list,
+    "/requests/add": handle_requests_add,
+    "/requests/remove": handle_requests_remove,
+    "/requests/qr": handle_requests_qr,
+    "/submissions/list": handle_submissions_list,
+    "/submissions/get": handle_submissions_get,
+    "/submissions/remove": handle_submissions_remove,
 }
+# 見るだけの API（変更の記録を残さない）
+STAFF_READ_ONLY = {"/clients/list", "/clients/qr", "/forms/list", "/requests/list", "/requests/qr",
+                   "/submissions/list"}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -409,7 +846,7 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", 0))
         except ValueError:
             length = -1
-        if not 0 < length <= MAX_BODY:
+        if not 0 < length <= BODY_LIMITS.get(self.path, MAX_BODY):
             raise UploadError(400, "不正なリクエストです。")
         try:
             body = json.loads(self.rfile.read(length))
@@ -436,9 +873,10 @@ class StaffHandler(Handler):
     routes = STAFF_ROUTES
 
     def after_route(self, body):
-        # 誰が変更したかを残す（ユーザー名は nginx のベーシック認証から）
-        if self.path != "/clients/list":
-            log.info("staff=%s %s code=%s", self.headers.get("X-Staff-User", "-"), self.path, body.get("code"))
+        # 誰が変更したか（入力内容を開いたか）を残す。ユーザー名は nginx のベーシック認証から
+        if self.path not in STAFF_READ_ONLY:
+            target = " ".join(f"{k}={body[k]}" for k in ("code", "id", "formId") if isinstance(body.get(k), str))
+            log.info("staff=%s %s %s", self.headers.get("X-Staff-User", "-"), self.path, target)
 
 
 def main():
