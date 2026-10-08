@@ -6,6 +6,8 @@ const FormRender = (() => {
   const LAYOUT_TYPES = new Set(['heading', 'divider', 'note', 'spacer', 'group', 'page']);
   // 説明を入力欄の中（薄い文字）に出せる種類
   const PLACEHOLDER_TYPES = new Set(['text', 'textarea', 'number', 'tel', 'email', 'zip', 'mynumber']);
+  // 添付ファイルで送れる種類（資料アップロードと同じ）
+  const FILE_ACCEPT = '.pdf,.jpg,.jpeg,.png,.heic,.xlsx,.xls,.docx,.doc,.csv';
   const INPUTS = {
     text: { type: 'text' },
     number: { type: 'text', inputMode: 'decimal' },
@@ -130,7 +132,7 @@ const FormRender = (() => {
     const box = el('div', 'f-field');
     const label = el(field.type === 'table' ? 'p' : 'label', 'f-label');
     label.append(el('span', field.hideLabel ? 'visually-hidden' : '', field.label));
-    if (field.type !== 'table' && field.type !== 'checkbox') label.htmlFor = `field-${field.id}`;
+    if (!['table', 'checkbox', 'checkboxes'].includes(field.type)) label.htmlFor = `field-${field.id}`;
     if (field.required) label.append(' ', el('span', 'required-mark', '必須'));
     else if (field.hideLabel) label.classList.add('visually-hidden');
     box.append(label);
@@ -217,8 +219,11 @@ const FormRender = (() => {
     } else {
       const input = createInput(field);
       if (helpInside(field, layout)) input.placeholder = field.help;
-      if (preview) (input.checkbox || input).disabled = true;
+      if (preview) for (const e of [input, ...input.querySelectorAll('input')]) e.disabled = true;
       body.append(input);
+      if (field.type === 'file') {
+        body.append(el('p', 'f-help', `PDF・画像（JPG・PNG・HEIC）・Excel・Word・CSV、1つ50MBまで、${field.maxFiles}個まで選べます。`));
+      }
       control = { field, input };
     }
     body.append(error);
@@ -236,7 +241,33 @@ const FormRender = (() => {
       wrap.checkbox = input;
       return wrap;
     }
+    // 複数チェック：選択肢ごとにチェックを並べる（checks に一覧）
+    if (field.type === 'checkboxes') {
+      const wrap = el('div', `f-checks${field.direction === 'horizontal' ? ' is-horizontal' : ''}`);
+      wrap.id = id;
+      wrap.setAttribute('role', 'group');
+      wrap.setAttribute('aria-label', field.label);
+      wrap.checks = field.options.map((option) => {
+        const label = el('label', 'f-check');
+        const input = el('input');
+        input.type = 'checkbox';
+        input.value = option;
+        label.append(input, ' ', option);
+        wrap.append(label);
+        return input;
+      });
+      return wrap;
+    }
     let input;
+    if (field.type === 'file') {
+      input = el('input');
+      input.type = 'file';
+      input.accept = FILE_ACCEPT;
+      input.multiple = field.maxFiles > 1;
+      input.id = id;
+      input.className = 'f-file';
+      return input;
+    }
     if (field.type === 'textarea') {
       input = el('textarea');
       input.rows = 4;
@@ -345,23 +376,24 @@ const FormRender = (() => {
   // --- 読むだけの表示（PDF と、事務所内ページで届いた内容を見るとき） ---
 
   // ページ区切りがあれば、ページごとに見出しを付けて分ける（PDF ではページごとに改ページ）
-  function buildView(container, fields, answers, layout = {}) {
+  // options.fileButton(file) があれば、添付ファイルの名前の横に置く（事務所内ページで取り出すボタン）
+  function buildView(container, fields, answers, layout = {}, options = {}) {
     const pages = splitPages(fields);
     if (pages.length === 1) {
-      viewGrid(container, pages[0].fields, answers, layout);
+      viewGrid(container, pages[0].fields, answers, layout, options);
       return;
     }
     container.replaceChildren(...pages.map((page, i) => {
       const section = el('section', 'f-page');
       section.append(el('h2', 'f-page-title', `${i + 1} / ${pages.length}${page.title ? `　${page.title}` : ''}`));
       const grid = el('div');
-      viewGrid(grid, page.fields, answers, layout);
+      viewGrid(grid, page.fields, answers, layout, options);
       section.append(grid);
       return section;
     }));
   }
 
-  function viewGrid(container, fields, answers, layout) {
+  function viewGrid(container, fields, answers, layout, options = {}) {
     const build = (grid, list) => {
       for (const field of list) {
         let e;
@@ -373,6 +405,7 @@ const FormRender = (() => {
           e.append(el('p', `f-label${field.hideLabel ? ' visually-hidden' : ''}`, field.label));
           const value = answers[field.id];
           if (field.type === 'table') e.append(viewTable(field, value || []));
+          else if (field.type === 'file' && options.fileButton && (value || []).length) e.append(viewFiles(value, options.fileButton));
           else e.append(el('p', 'f-value', displayValue(field, value) || '—'));
         }
         grid.append(place(e, field));
@@ -380,6 +413,21 @@ const FormRender = (() => {
     };
     container.classList.add('fgrid');
     build(container, fields);
+  }
+
+  function viewFiles(files, fileButton) {
+    const list = el('ul', 'f-files');
+    for (const file of files) {
+      const li = el('li', '', `${file.name}（${formatSize(file.size)}）`);
+      li.append(' ', fileButton(file));
+      list.append(li);
+    }
+    return list;
+  }
+
+  function formatSize(bytes) {
+    if (bytes < 1024 * 1024) return `${Math.max(1, Math.ceil(bytes / 1024))}KB`;
+    return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
   }
 
   function viewTable(field, rows) {
@@ -407,8 +455,10 @@ const FormRender = (() => {
 
   function displayValue(field, value) {
     if (field.type === 'checkbox') return value ? checkText(field) : '';
+    if (field.type === 'checkboxes') return Array.isArray(value) ? value.join('、') : '';
+    if (field.type === 'file') return Array.isArray(value) ? value.map((f) => f.name).join('、') : '';
     return value == null ? '' : String(value);
   }
 
-  return { isInput, iterFields, splitPages, canHelpInside, buildForm, buildView, tableRows, setCellValue, sums, parseNumber, formatNumber, displayValue };
+  return { isInput, iterFields, splitPages, canHelpInside, buildForm, buildView, tableRows, setCellValue, formatSize, sums, parseNumber, formatNumber, displayValue };
 })();

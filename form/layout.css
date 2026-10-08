@@ -49,6 +49,13 @@
 .f-input:disabled { background: #f7f5f0; }
 .f-check { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
 .f-check input { width: 20px; height: 20px; }
+/* 複数チェック（縦に並べる・横に並べる） */
+.f-checks { display: flex; flex-direction: column; gap: 6px; }
+.f-checks.is-horizontal { flex-direction: row; flex-wrap: wrap; gap: 8px 24px; }
+/* 添付ファイル */
+.f-file { display: block; width: 100%; padding: 8px; background: #fff; border: 1px dashed #b9b0a1; font-family: inherit; }
+.f-files { margin: 0; padding-left: 1.2em; }
+.f-files li { margin: 4px 0; word-break: break-all; }
 
 /* 見出し・区切り線・説明文・空白・枠 */
 .f-heading-box { padding-top: 12px; }

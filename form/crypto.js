@@ -53,6 +53,28 @@ const FormCrypto = (() => {
     return JSON.parse(new TextDecoder().decode(data));
   }
 
+  // 添付ファイル：ファイルごとの鍵（AES-GCM）で暗号化する。中身は「KABAENC1」＋iv（12バイト）＋暗号文。
+  // 鍵は入力内容の中に入れて送る（入力内容ごと事務所の公開鍵で包まれるので、事務所の鍵がないと開けない）
+  const FILE_MAGIC = new TextEncoder().encode('KABAENC1');
+
+  async function encryptFile(file) {
+    const aesKey = await subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt']);
+    const iv = random(12);
+    const data = await subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, await file.arrayBuffer());
+    const key = toB64(await subtle.exportKey('raw', aesKey));
+    return { blob: new Blob([FILE_MAGIC, iv, data], { type: 'application/octet-stream' }), key };
+  }
+
+  async function decryptFile(buffer, keyB64) {
+    const bytes = new Uint8Array(buffer);
+    if (bytes.length < FILE_MAGIC.length + 12 || !FILE_MAGIC.every((b, i) => bytes[i] === b)) {
+      throw new Error('暗号化したファイルではありません');
+    }
+    const aesKey = await subtle.importKey('raw', fromB64(keyB64), { name: 'AES-GCM' }, false, ['decrypt']);
+    const iv = bytes.subarray(FILE_MAGIC.length, FILE_MAGIC.length + 12);
+    return subtle.decrypt({ name: 'AES-GCM', iv }, aesKey, bytes.subarray(FILE_MAGIC.length + 12));
+  }
+
   async function passphraseKey(passphrase, salt, usages) {
     const base = await subtle.importKey('raw', new TextEncoder().encode(passphrase), 'PBKDF2', false, ['deriveKey']);
     return subtle.deriveKey({ name: 'PBKDF2', salt, iterations: PBKDF2_ITERATIONS, hash: 'SHA-256' },
@@ -97,5 +119,5 @@ const FormCrypto = (() => {
     }
   }
 
-  return { supported, fingerprint, shortFingerprint, encrypt, decrypt, createKey, openKey };
+  return { supported, fingerprint, shortFingerprint, encrypt, decrypt, encryptFile, decryptFile, createKey, openKey };
 })();

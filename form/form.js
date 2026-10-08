@@ -119,8 +119,15 @@ form.addEventListener('submit', async (event) => {
   try {
     // プレビューでは送信せず、そのまま送信後の画面（PDF の確認）へ進む
     let submitted = new Date().toISOString();
-    if (!preview) {
+    if (preview) {
+      for (const c of controls.filter((x) => x.field.type === 'file')) {
+        answers[c.field.id] = answers[c.field.id].map((f) => ({ name: f.name, size: f.size, type: f.type }));
+      }
+    } else {
       const body = { token };
+      const batch = await sendFiles(answers);
+      if (batch) body.batch = batch;
+      sendButton.textContent = '送信しています…';
       if (page.encrypt) body.encrypted = await FormCrypto.encrypt(page.publicKey, page.keyId, answers);
       else body.answers = answers;
       submitted = (await api('submit', body)).submitted;
@@ -137,6 +144,54 @@ form.addEventListener('submit', async (event) => {
 });
 
 document.getElementById('print').addEventListener('click', () => window.print());
+
+// --- 添付ファイル ---
+// 1つずつこの画面の中で暗号化し、ドライブに直接送る（VPS は通らない）。
+// answers のファイルの欄を { fileId, name, type, size, key } の一覧に置き換える（鍵は入力内容と一緒に暗号化される）。
+// ファイルがあれば、入力内容と結び付ける番号（batch）を返す
+async function sendFiles(answers) {
+  const fileControls = controls.filter((c) => c.field.type === 'file');
+  const total = fileControls.reduce((n, c) => n + answers[c.field.id].length, 0);
+  if (!total) {
+    for (const c of fileControls) answers[c.field.id] = [];
+    return null;
+  }
+  if (!page.encrypt) throw new Error('この入力ページではファイルを送れません。事務所にお問い合わせください。');
+  const batch = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
+  let done = 0;
+  for (const c of fileControls) {
+    const sent = [];
+    for (const file of answers[c.field.id]) {
+      done += 1;
+      sendButton.textContent = `ファイルを送信しています（${done}/${total}）…`;
+      const { blob, key } = await FormCrypto.encryptFile(file);
+      const session = await api('file-session', { token, fieldId: c.field.id, size: blob.size, batch });
+      const uploaded = await putFile(session.uploadUrl, blob);
+      await api('file-complete', { token, fileId: uploaded.id });
+      sent.push({ fileId: uploaded.id, name: file.name, type: file.type, size: file.size, key });
+    }
+    answers[c.field.id] = sent;
+  }
+  return batch;
+}
+
+function putFile(url, blob) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', url);
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+    xhr.addEventListener('load', () => {
+      try {
+        if (xhr.status !== 200 && xhr.status !== 201) throw new Error();
+        resolve(JSON.parse(xhr.responseText));
+      } catch {
+        reject(new Error('ファイルを送信できませんでした。時間をおいて再度お試しください'));
+      }
+    });
+    xhr.addEventListener('error', () => reject(new Error(NETWORK_ERROR)));
+    xhr.send(blob);
+  });
+}
 
 // --- 途中保存（この端末のブラウザに下書きを残す） ---
 // 入力するたびに自動で保存し、同じURLを同じ端末で開き直すと続きから入力できる。
@@ -170,9 +225,11 @@ function readDraft() {
 function saveDraft() {
   const values = {};
   for (const c of controls) {
-    if (c.field.type === 'mynumber') continue;
+    if (c.field.type === 'mynumber' || c.field.type === 'file') continue;
     if (c.field.type === 'checkbox') {
       values[c.field.id] = c.input.checkbox.checked;
+    } else if (c.field.type === 'checkboxes') {
+      values[c.field.id] = c.input.checks.filter((x) => x.checked).map((x) => x.value);
     } else if (c.field.type === 'table') {
       const skip = c.field.columns.filter((col) => col.type === 'mynumber').map((col) => col.id);
       values[c.field.id] = FormRender.tableRows(c, true).map((row) => {
@@ -194,9 +251,11 @@ function saveDraft() {
 function fillDraft(values) {
   for (const c of controls) {
     const value = values[c.field.id];
-    if (value == null || c.field.type === 'mynumber') continue;
+    if (value == null || c.field.type === 'mynumber' || c.field.type === 'file') continue;
     if (c.field.type === 'checkbox') {
       c.input.checkbox.checked = value === true;
+    } else if (c.field.type === 'checkboxes') {
+      if (Array.isArray(value)) for (const x of c.input.checks) x.checked = value.includes(x.value);
     } else if (c.field.type === 'table') {
       if (!Array.isArray(value)) continue;
       if (!c.fixed) {
@@ -245,12 +304,14 @@ function removeOldDrafts() {
 function showDraftNote(draft) {
   const note = document.getElementById('draft-note');
   const text = document.getElementById('draft-text');
-  const mynumber = hasMyNumber() ? 'マイナンバーは保存しません。' : '';
+  const hasFile = [...FormRender.iterFields(page.fields)].some((f) => f.type === 'file');
+  const mynumber = (hasMyNumber() ? 'マイナンバーは保存しません。' : '') + (hasFile ? 'ファイルは保存しません。' : '');
   if (draft) {
     const when = new Date(draft.saved).toLocaleString('ja-JP', {
       timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
     });
-    text.textContent = `前回（${when}）の途中まで入力した内容を戻しました。${mynumber ? 'マイナンバーはもう一度入力してください。' : ''}`;
+    const again = [hasMyNumber() && 'マイナンバー', hasFile && 'ファイル'].filter(Boolean).join('と');
+    text.textContent = `前回（${when}）の途中まで入力した内容を戻しました。${again ? `${again}はもう一度入力してください。` : ''}`;
     note.classList.add('is-restored');
   } else {
     text.textContent = `入力内容はこの端末に自動で一時保存され、同じ端末でこのページを開き直すと続きから入力できます（送信すると消えます）。${mynumber}家族などと共用の端末では、入力をやめるときに下のボタンで消してください。`;
@@ -297,6 +358,8 @@ function collect(list = controls) {
 
 function inputValue(c) {
   if (c.field.type === 'checkbox') return c.input.checkbox.checked;
+  if (c.field.type === 'checkboxes') return c.input.checks.filter((x) => x.checked).map((x) => x.value);
+  if (c.field.type === 'file') return Array.from(c.input.files);
   const value = normalize(c.field.type, c.input.value);
   if (c.input.tagName !== 'SELECT') c.input.value = value;
   return value;
@@ -333,10 +396,27 @@ function check(field, value) {
     }
     return '';
   }
+  if (field.type === 'checkboxes') return field.required && !value.length ? '1つ以上選んでください' : '';
+  if (field.type === 'file') return checkFiles(field, value);
   if (field.required && (value === '' || value === false)) {
     return field.type === 'checkbox' ? '確認のうえ、チェックを入れてください' : '入力してください';
   }
   return field.type === 'checkbox' ? '' : checkValue(field.type, value);
+}
+
+const FILE_EXTS = ['pdf', 'jpg', 'jpeg', 'png', 'heic', 'xlsx', 'xls', 'docx', 'doc', 'csv'];
+const MAX_FILE_SIZE = 50 * 1024 * 1024;
+
+function checkFiles(field, files) {
+  if (field.required && !files.length) return 'ファイルを選んでください';
+  if (files.length > field.maxFiles) return `ファイルは${field.maxFiles}個まで選べます`;
+  for (const file of files) {
+    const ext = file.name.includes('.') ? file.name.split('.').pop().toLowerCase() : '';
+    if (!FILE_EXTS.includes(ext)) return `「${file.name}」は送れない種類のファイルです`;
+    if (file.size === 0) return `「${file.name}」は空のファイルです`;
+    if (file.size > MAX_FILE_SIZE) return `「${file.name}」は50MBを超えています`;
+  }
+  return '';
 }
 
 function checkValue(type, value) {

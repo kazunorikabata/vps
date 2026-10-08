@@ -268,7 +268,7 @@ function renderSubmissions() {
     ops.className = 'ops';
     const show = () => ops.replaceChildren(
       button('表示', () => run(() => showSubmission(sub))),
-      button('削除', () => askConfirm(ops, `${sub.code}（${formatDate(sub.submitted)}）の入力内容を削除しますか？ ドライブのゴミ箱に移り、30日後に完全に削除されます。`,
+      button('削除', () => askConfirm(ops, `${sub.code}（${formatDate(sub.submitted)}）の入力内容を削除しますか？ 添付ファイルも一緒に、ドライブのゴミ箱に移り、30日後に完全に削除されます。`,
         '削除する', async () => {
           await api('submissions/remove', { id: sub.id });
           submissions = submissions.filter((s) => s !== sub);
@@ -306,12 +306,45 @@ async function showSubmission(sub) {
   h.textContent = `${record.code}　${formatDate(record.submitted)}`;
   // 顧問先の画面と同じ並びで表示する（送信したときの項目で。項目名の位置は今の入力ページの設定）
   const grid = document.createElement('div');
-  FormRender.buildView(grid, record.fields, answers, current);
+  FormRender.buildView(grid, record.fields, answers, current, {
+    fileButton: (file) => button('取り出す', () => run(() => saveAttachment(file)), 'button-outline'),
+  });
   const close = button('閉じる', () => { subView.hidden = true; subView.replaceChildren(); }, 'button-outline');
   close.style.marginTop = '12px';
   subView.replaceChildren(h, grid, close);
   subView.hidden = false;
   subView.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// 添付ファイルを受け取り、このブラウザの中で復号して保存する（鍵は入力内容の中にある）
+async function saveAttachment(file) {
+  let res;
+  try {
+    res = await fetch('/api/staff/submissions/file', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: file.fileId }),
+    });
+  } catch {
+    throw new Error('通信できませんでした。時間をおいて再度お試しください');
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || `ファイルを取り出せませんでした（${res.status}）`);
+  }
+  let plain;
+  try {
+    plain = await FormCrypto.decryptFile(await res.arrayBuffer(), file.key);
+  } catch {
+    throw new Error('ファイルを復号できませんでした。ファイルが壊れているおそれがあります');
+  }
+  const url = URL.createObjectURL(new Blob([plain], { type: file.type || 'application/octet-stream' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = file.name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  showMessage(`「${file.name}」を取り出しました。使い終わったら、PCに残ったファイルを削除してください`, 'ok');
 }
 
 // 加工しやすいように、1件を1行にして書き出す。表は「扶養家族1_氏名」「月別_1月_金額」のように列を分け、

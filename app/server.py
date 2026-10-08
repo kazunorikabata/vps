@@ -74,11 +74,17 @@ TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{20,128}$")
 FILE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{10,200}$")
 CODE_RE = re.compile(r"^[A-Za-z0-9_-]{1,20}$")
 FORM_ID_RE = re.compile(r"^f[0-9a-f]{12}$")
+# 入力ページで添付するファイル。ブラウザの中で暗号化してから、ドライブに直接送る（VPS は通らない）。
+# 暗号化したファイルは先頭が FILE_MAGIC。1回の送信のファイルと入力内容は、同じ batch の番号で結び付ける
+FILE_MAGIC = b"KABAENC1"
+MAX_ENCRYPTED_SIZE = MAX_SIZE + 64
+MAX_FILES = 10
+BATCH_RE = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
 FIELD_ID_RE = re.compile(r"^[a-z0-9_]{1,40}$")
 B64_RE = re.compile(r"^[A-Za-z0-9+/]+={0,2}$")
 
 # 入力ページの項目の種類（表の列に使えるのは COLUMN_TYPES だけ）
-FIELD_TYPES = {"heading", "text", "textarea", "number", "date", "select", "checkbox",
+FIELD_TYPES = {"heading", "text", "textarea", "number", "date", "select", "checkbox", "checkboxes", "file",
                "tel", "email", "zip", "mynumber", "table", "divider", "note", "spacer", "group", "page"}
 # 入力欄のない部品（見出し・区切り線・説明文・空白・枠・ページ区切り）
 LAYOUT_TYPES = {"heading", "divider", "note", "spacer", "group", "page"}
@@ -186,8 +192,11 @@ def create_folder(name, parent_id=None):
     return r.json()["id"]
 
 
-def create_upload_session(folder_id, name, mime, size):
+def create_upload_session(folder_id, name, mime, size, app_properties=None):
     """1ファイル分の受付口（URL）を発行する。Origin を付けるとブラウザから直接送れる"""
+    meta = {"name": name, "parents": [folder_id], "mimeType": mime}
+    if app_properties:
+        meta["appProperties"] = app_properties
     r = requests.post(
         DRIVE_UPLOAD_API,
         params={"uploadType": "resumable", "supportsAllDrives": "true"},
@@ -197,7 +206,7 @@ def create_upload_session(folder_id, name, mime, size):
             "X-Upload-Content-Length": str(size),
             "Origin": ALLOWED_ORIGIN,
         },
-        json={"name": name, "parents": [folder_id], "mimeType": mime},
+        json=meta,
         timeout=15,
     )
     r.raise_for_status()
@@ -265,10 +274,15 @@ def create_json_file(folder_id, name, data, app_properties):
 
 def list_form_files(form_id):
     """入力ページに送られた入力内容のファイルを、新しい順に返す"""
+    return list_by_property("kabaForm", form_id)
+
+
+def list_by_property(key, value):
+    """appProperties の key が value のファイルを、新しい順に返す（value は形を確かめた値だけ渡す）"""
     files, page = [], None
     while True:
         params = {
-            "q": f"appProperties has {{ key='kabaForm' and value='{form_id}' }} and trashed = false",
+            "q": f"appProperties has {{ key='{key}' and value='{value}' }} and trashed = false",
             "fields": "nextPageToken, files(id, name, createdTime, appProperties)",
             "orderBy": "createdTime desc",
             "pageSize": 1000,
@@ -284,6 +298,19 @@ def list_form_files(form_id):
         page = data.get("nextPageToken")
         if not page:
             return files
+
+
+def open_download(file_id):
+    """ファイルの中身を少しずつ読むための応答を返す（大きなファイル用）"""
+    r = requests.get(
+        f"{DRIVE_API}/{file_id}",
+        params={"alt": "media", "supportsAllDrives": "true"},
+        headers=auth_headers(),
+        timeout=60,
+        stream=True,
+    )
+    r.raise_for_status()
+    return r
 
 
 def download_json(file_id):
@@ -462,7 +489,13 @@ def check_field(f, ids, in_group=False):
     if ftype == "checkbox":
         # チェックの横の文言（空なら画面では「はい」）
         field["checkText"] = text(f.get("checkText", ""), 100, "チェックの横の文言")
-    if ftype == "select":
+    if ftype == "checkboxes":
+        # 選択肢をいくつでも選べるチェック。縦に並べるか横に並べるか
+        field["direction"] = "horizontal" if f.get("direction") == "horizontal" else "vertical"
+    if ftype == "file":
+        field["maxFiles"] = check_int(f.get("maxFiles"), 1, MAX_FILES, 1,
+                                      f"「{field['label']}」のファイルの数は1〜{MAX_FILES}個で指定してください。")
+    if ftype in ("select", "checkboxes"):
         options = f.get("options")
         if not isinstance(options, list) or not 1 <= len(options) <= 100:
             raise UploadError(400, f"「{field['label']}」の選択肢を1〜100個で入力してください。")
@@ -519,6 +552,10 @@ def has_mynumber(fields):
                for f in iter_fields(fields))
 
 
+def has_file(fields):
+    return any(f["type"] == "file" for f in iter_fields(fields))
+
+
 def check_form(form):
     """事務所内ページから送られた入力ページの定義を確かめて、保存する形に整える"""
     if not isinstance(form, dict):
@@ -533,6 +570,8 @@ def check_form(form):
     encrypt = form.get("encrypt") is not False
     if not encrypt and has_mynumber(fields):
         raise UploadError(400, "マイナンバーの項目がある入力ページは、暗号化を外せません。")
+    if not encrypt and has_file(fields):
+        raise UploadError(400, "ファイルの項目がある入力ページは、暗号化を外せません。")
     return {
         "title": text(form.get("title"), 100, "入力ページの名前", required=True),
         "description": text(form.get("description", ""), 2000, "説明"),
@@ -575,6 +614,8 @@ def check_answers(form, answers):
             raise UploadError(400, "送信内容の形式が正しくありません。")
         if f["type"] == "checkbox":
             ok = isinstance(value, bool)
+        elif f["type"] == "checkboxes":
+            ok = isinstance(value, list) and all(isinstance(v, str) and v in f["options"] for v in value)
         elif f["type"] == "table":
             cols = {c["id"] for c in f["columns"]}
             ok = isinstance(value, list) and len(value) <= f["maxRows"] and all(
@@ -676,6 +717,9 @@ def handle_form_submit(body):
         }}
     else:
         content = {"answers": check_answers(form, body.get("answers"))}
+    batch = body.get("batch")
+    if batch is not None and (not isinstance(batch, str) or not BATCH_RE.match(batch)):
+        raise UploadError(400, "送信内容の形式が正しくありません。")
     check_rate(token)
     now = datetime.now(JST)
     record = {
@@ -688,12 +732,63 @@ def handle_form_submit(body):
         "fields": form["fields"],
         **content,
     }
-    title = re.sub(r'[\x00-\x1f\x7f/\\:*?"<>|]', "_", form["title"])[:60]
-    create_json_file(folder_id, f"{now:%Y%m%d-%H%M%S}_{title}.json", record,
-                     {"kabaForm": req["form_id"], "kabaCode": req["code"]})
+    title = form_title_for_name(form)
+    props = {"kabaForm": req["form_id"], "kabaCode": req["code"]}
+    if batch:
+        props["kabaBatch"] = batch   # 一緒に送られたファイル（入力内容を削除するときに一緒に消す）
+    create_json_file(folder_id, f"{now:%Y%m%d-%H%M%S}_{title}.json", record, props)
     # 入力内容は記録に残さない
     log.info("form submitted code=%s form=%s encrypted=%s", req["code"], req["form_id"], form["encrypt"])
     return {"ok": True, "submitted": record["submitted"]}
+
+
+def form_title_for_name(form):
+    return re.sub(r'[\x00-\x1f\x7f/\\:*?"<>|]', "_", form["title"])[:60]
+
+
+def handle_form_file_session(body):
+    """入力ページのファイル（ブラウザで暗号化したもの）の受付口を発行する。元のファイル名は受け取らない"""
+    token = body.get("token")
+    req, form = find_request(token)
+    field_id = body.get("fieldId")
+    if not any(f["id"] == field_id and f["type"] == "file" for f in iter_fields(form["fields"])):
+        raise UploadError(400, "送信内容の形式が正しくありません。")
+    size = body.get("size")
+    if not isinstance(size, int) or isinstance(size, bool) or size <= len(FILE_MAGIC):
+        raise UploadError(400, "ファイルが空です。")
+    if size > MAX_ENCRYPTED_SIZE:
+        raise UploadError(400, "50MBを超えるファイルは送信できません。")
+    batch = body.get("batch")
+    if not isinstance(batch, str) or not BATCH_RE.match(batch):
+        raise UploadError(400, "送信内容の形式が正しくありません。")
+    folder_id = find_folder(req["code"])
+    if not folder_id:
+        raise UploadError(403, "このURLは無効です。事務所にお問い合わせください。")
+    check_rate(token)
+    name = f"{datetime.now(JST):%Y%m%d-%H%M%S}_{form_title_for_name(form)}_添付_{secrets.token_hex(3)}.enc"
+    url = create_upload_session(folder_id, name, "application/octet-stream", size,
+                                {"kabaFileOf": req["form_id"], "kabaCode": req["code"], "kabaBatch": batch})
+    log.info("form file session code=%s form=%s size=%d", req["code"], req["form_id"], size)
+    return {"uploadUrl": url}
+
+
+def handle_form_file_complete(body):
+    """送られたファイルが、この顧問先のフォルダにある暗号化したファイルか確かめる。違えばゴミ箱へ"""
+    req, form = find_request(body.get("token"))
+    file_id = body.get("fileId")
+    if not isinstance(file_id, str) or not FILE_ID_RE.match(file_id):
+        raise UploadError(400, "ファイルが見つかりません。")
+    f = get_file(file_id)
+    folder_id = find_folder(req["code"])
+    if (f is None or folder_id not in f.get("parents", [])
+            or f.get("appProperties", {}).get("kabaFileOf") != req["form_id"]):
+        raise UploadError(404, "ファイルが見つかりません。")
+    size = int(f.get("size", 0))
+    if not len(FILE_MAGIC) < size <= MAX_ENCRYPTED_SIZE or read_head(file_id, len(FILE_MAGIC)) != FILE_MAGIC:
+        trash_file(file_id)
+        log.warning("form file rejected code=%s form=%s size=%d", req["code"], req["form_id"], size)
+        raise UploadError(400, "ファイルを受け付けられませんでした。もう一度お試しください。")
+    return {"ok": True}
 
 
 def client_view(token, client):
@@ -865,10 +960,34 @@ def handle_submissions_get(body):
 
 
 def handle_submissions_remove(body):
-    """ドライブのゴミ箱に移す（ゴミ箱からは30日後に完全に削除される）"""
+    """ドライブのゴミ箱に移す（ゴミ箱からは30日後に完全に削除される）。一緒に送られたファイルも移す"""
     f = find_submission(body.get("id"))
     trash_file(f["id"])
+    batch = f.get("appProperties", {}).get("kabaBatch")
+    if batch and BATCH_RE.match(batch):
+        for attached in list_by_property("kabaBatch", batch):
+            if "kabaFileOf" in attached.get("appProperties", {}):
+                trash_file(attached["id"])
     return {"ok": True}
+
+
+class FileResponse:
+    """JSON ではなく、ファイルの中身をそのまま返す応答"""
+    def __init__(self, response):
+        self.response = response
+
+
+def handle_submissions_file(body):
+    """入力ページで添付されたファイル（暗号化したまま）を返す。事務所のブラウザで復号する"""
+    file_id = body.get("id")
+    if not isinstance(file_id, str) or not FILE_ID_RE.match(file_id):
+        raise UploadError(400, "ファイルが見つかりません。")
+    f = get_file(file_id)
+    if f is None or "kabaFileOf" not in f.get("appProperties", {}):
+        raise UploadError(404, "ファイルが見つかりません。")
+    if int(f.get("size", 0)) > MAX_ENCRYPTED_SIZE:
+        raise UploadError(400, "ファイルが大きすぎます。")
+    return FileResponse(open_download(file_id))
 
 
 ROUTES = {
@@ -876,6 +995,8 @@ ROUTES = {
     "/complete": handle_complete,
     "/form/get": handle_form_get,
     "/form/submit": handle_form_submit,
+    "/form/file-session": handle_form_file_session,
+    "/form/file-complete": handle_form_file_complete,
 }
 
 # 顧問先用とは別のポートで受ける。顧問先用の入口から管理の機能に届かないようにするため
@@ -896,6 +1017,7 @@ STAFF_ROUTES = {
     "/submissions/list": handle_submissions_list,
     "/submissions/get": handle_submissions_get,
     "/submissions/remove": handle_submissions_remove,
+    "/submissions/file": handle_submissions_file,
 }
 # 見るだけの API（変更の記録を残さない）
 STAFF_READ_ONLY = {"/clients/list", "/clients/qr", "/forms/list", "/requests/list", "/requests/qr",
@@ -916,7 +1038,10 @@ class Handler(BaseHTTPRequestHandler):
             body = self.read_json()
             data = route(body)
             self.after_route(body)
-            self.send_json(200, data)
+            if isinstance(data, FileResponse):
+                self.send_file(data.response)
+            else:
+                self.send_json(200, data)
         except UploadError as e:
             self.send_json(e.status, {"error": e.message})
         except Exception:
@@ -949,6 +1074,17 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(payload)
+
+    def send_file(self, response):
+        with response:
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            if response.headers.get("Content-Length"):
+                self.send_header("Content-Length", response.headers["Content-Length"])
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            for chunk in response.iter_content(1024 * 1024):
+                self.wfile.write(chunk)
 
     def log_message(self, format, *args):
         log.info(format, *args)

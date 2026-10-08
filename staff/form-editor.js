@@ -9,6 +9,8 @@ const TYPES = {
   date: '日付',
   select: '選択肢',
   checkbox: 'チェック',
+  checkboxes: '複数チェック',
+  file: 'ファイル',
   tel: '電話番号',
   email: 'メールアドレス',
   zip: '郵便番号',
@@ -33,6 +35,7 @@ const WIDTHS = {
 };
 // 追加したときの幅
 const DEFAULT_WIDTH = { text: 6, email: 6, number: 4, date: 4, select: 4, checkbox: 4, tel: 4, mynumber: 4, zip: 3, spacer: 3 };
+const DIRECTIONS = { vertical: '縦に並べる', horizontal: '横に並べる' };
 
 const editor = document.getElementById('editor');
 const canvas = document.getElementById('ed-canvas');
@@ -121,7 +124,9 @@ function openEditor(form) {
 function prepareField(field) {
   if (!field.width) field.width = 12;
   if (field.label == null) field.label = '';
-  if (field.type === 'select' && !field.options) field.options = [];
+  if ((field.type === 'select' || field.type === 'checkboxes') && !field.options) field.options = [];
+  if (field.type === 'checkboxes' && !field.direction) field.direction = 'vertical';
+  if (field.type === 'file' && !field.maxFiles) field.maxFiles = 1;
   if (field.type === 'note' && !field.style) field.style = 'normal';
   if (field.type === 'group' && !field.children) field.children = [];
   if (field.type === 'page') { field.width = 12; field.newRow = true; }
@@ -161,13 +166,15 @@ function hasMyNumber() {
 }
 
 // マイナンバーの項目があるときは、暗号化を外せない
+// マイナンバーやファイルの項目があるときは、暗号化を外せない（ファイルも暗号化して送るため）
 function showEncryptNote() {
-  const forced = hasMyNumber();
+  const hasFile = [...FormRender.iterFields(editing.form.fields)].some((f) => f.type === 'file');
+  const forced = hasMyNumber() || hasFile;
   if (forced) editing.form.encrypt = true;
   edEncrypt.checked = editing.form.encrypt;
   edEncrypt.disabled = forced;
   const note = document.getElementById('ed-encrypt-note');
-  if (forced) note.textContent = 'マイナンバーの項目があるため、暗号化は外せません。';
+  if (forced) note.textContent = `${hasMyNumber() ? 'マイナンバー' : 'ファイル'}の項目があるため、暗号化は外せません。`;
   else if (editing.form.encrypt) note.textContent = '入力内容は事務所の鍵でしか開けません。サーバーやドライブから漏れても読まれません。';
   else note.textContent = '暗号化しない場合、入力内容はドライブにそのまま保存されます。個人情報を含む入力ページでは暗号化してください。';
 }
@@ -452,7 +459,28 @@ function renderProps() {
     text.addEventListener('input', () => { field.checkText = text.value; renderCanvas(); });
     items.push(propRow('チェックの横の文言', text));
   }
-  if (field.type === 'select') items.push(propRow('選択肢（1行に1つ）', optionsEditor(field)));
+  if (field.type === 'select' || field.type === 'checkboxes') items.push(propRow('選択肢（1行に1つ）', optionsEditor(field)));
+  if (field.type === 'checkboxes') {
+    const direction = select(DIRECTIONS, field.direction, '選択肢の並べ方');
+    direction.addEventListener('change', () => { field.direction = direction.value; renderCanvas(); });
+    items.push(propRow('選択肢の並べ方', direction));
+  }
+  if (field.type === 'file') {
+    const max = document.createElement('input');
+    max.type = 'number';
+    max.min = 1;
+    max.max = 10;
+    max.value = field.maxFiles;
+    max.addEventListener('input', () => {
+      field.maxFiles = Math.max(1, Math.min(10, Number(max.value) || 1));
+      renderCanvas();
+    });
+    items.push(propRow('送れるファイルの数（1〜10）', max));
+    const note = document.createElement('p');
+    note.className = 'hint';
+    note.textContent = 'ファイルは顧問先の画面で暗号化して、その顧問先のドライブのフォルダに送ります。開くときは「届いた内容」で鍵を読み込んで取り出します。';
+    items.push(note);
+  }
   if (field.type === 'table') items.push(...tableEditor(field));
 
   const ops = document.createElement('div');
@@ -500,7 +528,9 @@ function textArea(value, rows, label, maxLength) {
 
 function changeType(field, type) {
   field.type = type;
-  if (type !== 'select') delete field.options;
+  if (type !== 'select' && type !== 'checkboxes') delete field.options;
+  if (type !== 'checkboxes') delete field.direction;
+  if (type !== 'file') delete field.maxFiles;
   if (type !== 'table') { delete field.columns; delete field.maxRows; delete field.rowLabels; }
   if (type !== 'note') delete field.style;
   if (type !== 'checkbox') delete field.checkText;

@@ -336,6 +336,9 @@ class FormTest(unittest.TestCase):
             "get_file": mock.Mock(return_value={"id": "file123456", "size": "100",
                                                 "appProperties": {"kabaForm": "f000000000000"}}),
             "trash_file": mock.Mock(),
+            "create_upload_session": mock.Mock(return_value="https://upload.example/session"),
+            "read_head": mock.Mock(return_value=server.FILE_MAGIC),
+            "list_by_property": mock.Mock(return_value=[]),
         }
         for name, m in self.drive.items():
             p = mock.patch.object(server, name, m)
@@ -553,6 +556,100 @@ class FormTest(unittest.TestCase):
         self.assertEqual((col["type"], col["sum"]), ("checkbox", False))   # 合計は数字の列だけ
         answers = {"name": "ダミー", "family": [{"name": "ダミー花子", "birth": "", "live": "はい"}, {"live": ""}]}
         self.assertEqual(self.post("/form/submit", {"token": token, "answers": answers})[0], 200)
+
+    def test_checkboxes(self):
+        fields = self.form()["fields"]
+        fields.append({"id": "deduct", "type": "checkboxes", "label": "控除", "options": ["医療費", "寄附金"],
+                       "direction": "horizontal"})
+        _, token = self.make_request(encrypt=False, fields=fields)
+        status, data = self.staff("/forms/list", {})
+        self.assertEqual(data["forms"][0]["fields"][5]["direction"], "horizontal")
+        ok = {"name": "ダミー", "deduct": ["医療費", "寄附金"]}
+        self.assertEqual(self.post("/form/submit", {"token": token, "answers": ok})[0], 200)
+        for bad in ({"deduct": ["その他"]}, {"deduct": "医療費"}):
+            self.assertEqual(self.post("/form/submit", {"token": token, "answers": bad})[0], 400, bad)
+        no_options = self.form(fields=[{"id": "c", "type": "checkboxes", "label": "x", "options": []}])
+        self.assertEqual(self.staff("/forms/save", {"form": no_options})[0], 400)
+
+    def file_form(self):
+        fields = self.form()["fields"]
+        fields.append({"id": "docs", "type": "file", "label": "書類", "maxFiles": 3})
+        return fields
+
+    def test_file_field_requires_encryption(self):
+        self.assertEqual(self.staff("/forms/save", {"form": self.form(fields=self.file_form(), encrypt=False)})[0], 400)
+        status, data = self.staff("/forms/save", {"form": self.form(fields=self.file_form())})
+        self.assertEqual(data["form"]["fields"][5]["maxFiles"], 3)
+        too_many = self.file_form()
+        too_many[5]["maxFiles"] = 11
+        self.assertEqual(self.staff("/forms/save", {"form": self.form(fields=too_many)})[0], 400)
+
+    def test_file_upload(self):
+        form_id, token = self.make_request(fields=self.file_form())
+        batch = "b" * 20
+        good = {"token": token, "fieldId": "docs", "size": 1000, "batch": batch}
+        status, data = self.post("/form/file-session", good)
+        self.assertEqual((status, data["uploadUrl"]), (200, "https://upload.example/session"))
+        folder, name, mime, size, props = self.drive["create_upload_session"].call_args.args
+        self.assertEqual((folder, mime, size), (FOLDER, "application/octet-stream", 1000))
+        self.assertRegex(name, r"^\d{8}-\d{6}_年末調整の確認_添付_[0-9a-f]{6}\.enc$")
+        self.assertEqual(props, {"kabaFileOf": form_id, "kabaCode": "C001", "kabaBatch": batch})
+        for bad in ({"fieldId": "name"}, {"size": 0}, {"size": server.MAX_ENCRYPTED_SIZE + 1}, {"batch": "../x"}):
+            self.assertEqual(self.post("/form/file-session", {**good, **bad})[0], 400, bad)
+        self.assertEqual(self.post("/form/file-session", {**good, "token": "x" * 24})[0], 403)
+
+        uploaded = {"id": "file123456", "size": "1000", "parents": [FOLDER], "appProperties": {"kabaFileOf": form_id}}
+        self.drive["get_file"].return_value = uploaded
+        self.assertEqual(self.post("/form/file-complete", {"token": token, "fileId": "file123456"}), (200, {"ok": True}))
+        # 別のフォルダ・別の入力ページのファイルは扱わない
+        for other in ({"parents": ["otherFolder1"]}, {"appProperties": {"kabaFileOf": "f999999999999"}}):
+            self.drive["get_file"].return_value = {**uploaded, **other}
+            self.assertEqual(self.post("/form/file-complete", {"token": token, "fileId": "file123456"})[0], 404)
+        self.drive["trash_file"].assert_not_called()
+        # 暗号化していないファイルはゴミ箱へ
+        self.drive["get_file"].return_value = uploaded
+        self.drive["read_head"].return_value = b"%PDF-1.7"
+        self.assertEqual(self.post("/form/file-complete", {"token": token, "fileId": "file123456"})[0], 400)
+        self.drive["trash_file"].assert_called_once_with("file123456")
+
+    def test_submit_with_batch_and_remove_files(self):
+        form_id, token = self.make_request(fields=self.file_form())
+        self.set_key()
+        batch = "b" * 20
+        body = {"token": token, "encrypted": self.encrypted(), "batch": batch}
+        self.assertEqual(self.post("/form/submit", body)[0], 200)
+        props = self.drive["create_json_file"].call_args.args[3]
+        self.assertEqual(props["kabaBatch"], batch)
+        self.assertEqual(self.post("/form/submit", {**body, "batch": "x"})[0], 400)
+        # 入力内容を削除すると、一緒に送られたファイルも消す（入力内容のファイル自体は消さない）
+        self.drive["get_file"].return_value = {"id": "file123456", "size": "100",
+                                               "appProperties": {"kabaForm": form_id, "kabaBatch": batch}}
+        self.drive["list_by_property"].return_value = [
+            {"id": "attached01", "appProperties": {"kabaFileOf": form_id, "kabaBatch": batch}},
+            {"id": "notattach1", "appProperties": {"kabaBatch": batch}},
+        ]
+        self.assertEqual(self.staff("/submissions/remove", {"id": "file123456"})[0], 200)
+        self.drive["list_by_property"].assert_called_once_with("kabaBatch", batch)
+        self.assertEqual([c.args[0] for c in self.drive["trash_file"].call_args_list], ["file123456", "attached01"])
+
+    def test_staff_file_download(self):
+        response = mock.MagicMock()
+        response.headers = {"Content-Length": "12"}
+        response.iter_content.return_value = [server.FILE_MAGIC, b"data"]
+        response.__enter__.return_value = response
+        with mock.patch.object(server, "open_download", return_value=response):
+            self.drive["get_file"].return_value = {"id": "file123456", "size": "12", "appProperties": {"kabaFileOf": "f000000000000"}}
+            conn = http.client.HTTPConnection("127.0.0.1", self.ports["staff"])
+            conn.request("POST", "/submissions/file", json.dumps({"id": "file123456"}),
+                         {"Content-Type": "application/json", "Origin": ORIGIN})
+            res = conn.getresponse()
+            self.assertEqual((res.status, res.read()), (200, server.FILE_MAGIC + b"data"))
+            conn.close()
+            # 入力ページの添付ファイル以外（アップロードされた資料など）は返さない
+            self.drive["get_file"].return_value = {"id": "file123456", "size": "12", "appProperties": {"kabaForm": "f000000000000"}}
+            self.assertEqual(self.staff("/submissions/file", {"id": "file123456"})[0], 404)
+            # 顧問先用の入口からは使えない
+            self.assertEqual(self.post("/submissions/file", {"id": "file123456"})[0], 404)
 
     def test_layout_answers(self):
         form = self.layout_form()
