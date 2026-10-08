@@ -6,6 +6,8 @@
 const NETWORK_ERROR = '通信できませんでした。電波の良い場所で再度お試しください';
 
 const token = location.hash.slice(1);
+// 事務所内ページの作成画面の「プレビュー」から開いたとき。項目は作成画面から受け取り、送信はしない
+const preview = token === 'preview';
 const form = document.getElementById('entry-form');
 const fieldsBox = document.getElementById('fields');
 const formError = document.getElementById('form-error');
@@ -23,15 +25,20 @@ start();
 
 async function start() {
   try {
-    if (!/^[A-Za-z0-9_-]{20,128}$/.test(token)) throw new Error('このURLは無効です。事務所にお問い合わせください。');
-    page = await api('get', { token });
-    if (page.encrypt && !FormCrypto.supported()) {
-      throw new Error('お使いのブラウザでは送信できません。最新のブラウザ（Chrome、Safari、Edge など）でお試しください。');
+    if (preview) {
+      page = previewForm();
+    } else {
+      if (!/^[A-Za-z0-9_-]{20,128}$/.test(token)) throw new Error('このURLは無効です。事務所にお問い合わせください。');
+      page = await api('get', { token });
+      if (page.encrypt && !FormCrypto.supported()) {
+        throw new Error('お使いのブラウザでは送信できません。最新のブラウザ（Chrome、Safari、Edge など）でお試しください。');
+      }
     }
   } catch (err) {
     showInvalid(err.message);
     return;
   }
+  document.getElementById('preview-note').hidden = !preview;
   document.title = `${page.title}｜蒲田和紀税理士事務所`;
   document.getElementById('title').textContent = page.title;
   document.getElementById('description').textContent = page.description;
@@ -69,6 +76,19 @@ function moveStep(index) {
 
 prevButton.addEventListener('click', () => moveStep(stepIndex - 1));
 
+// 開いた元の作成画面から、編集中の内容を受け取る（別のサイトから開かれたときは、ブラウザが読ませない）
+function previewForm() {
+  let form = null;
+  try {
+    form = JSON.parse(JSON.stringify(window.opener.formPreview()));
+  } catch {
+    // 作成画面から開いていない、または作成画面が閉じられた
+  }
+  if (!form) throw new Error('プレビューは、事務所内ページの入力ページの作成画面から開いてください。');
+  if (!form.title) form.title = '（名前を入れてください）';
+  return form;
+}
+
 function showInvalid(text) {
   document.getElementById('loading').hidden = true;
   const invalid = document.getElementById('invalid');
@@ -76,7 +96,7 @@ function showInvalid(text) {
   invalid.hidden = false;
 }
 
-form.addEventListener('input', () => { dirty = true; });
+form.addEventListener('input', () => { dirty = !preview; });
 
 // 入力の途中でページを閉じようとしたら確認する
 window.addEventListener('beforeunload', (event) => {
@@ -96,12 +116,16 @@ form.addEventListener('submit', async (event) => {
   sendButton.disabled = true;
   sendButton.textContent = '送信しています…';
   try {
-    const body = { token };
-    if (page.encrypt) body.encrypted = await FormCrypto.encrypt(page.publicKey, page.keyId, answers);
-    else body.answers = answers;
-    const result = await api('submit', body);
+    // プレビューでは送信せず、そのまま送信後の画面（PDF の確認）へ進む
+    let submitted = new Date().toISOString();
+    if (!preview) {
+      const body = { token };
+      if (page.encrypt) body.encrypted = await FormCrypto.encrypt(page.publicKey, page.keyId, answers);
+      else body.answers = answers;
+      submitted = (await api('submit', body)).submitted;
+    }
     dirty = false;
-    showDone(answers, result.submitted);
+    showDone(answers, submitted);
   } catch (err) {
     showFormError(err.message);
   } finally {

@@ -76,6 +76,14 @@ document.getElementById('ed-save').addEventListener('click', () => run(async () 
   await loadForms();
 }));
 
+// プレビュー：顧問先の入力画面を別のタブで開き、そこから formPreview() で編集中の内容を受け取ってもらう
+// （同じサイトの画面からしか呼べない）。毎回 URL を変えて、開いているタブも読み込み直させる
+window.formPreview = () => editing && structuredClone(editing.form);
+document.getElementById('ed-preview').addEventListener('click', () => {
+  const tab = window.open(`/form/index.html?preview=${Date.now()}#preview`, 'kabaoffice-form-preview');
+  if (!tab) showMessage('プレビューを開けませんでした。ブラウザでポップアップを許可してください', 'error');
+});
+
 // 何もないところを押したら、選ぶのをやめる
 canvas.addEventListener('click', (event) => {
   if (event.target === canvas) selectField(null);
