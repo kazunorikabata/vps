@@ -503,6 +503,26 @@ class FormTest(unittest.TestCase):
         nested["fields"][0]["children"].append({"id": "p2", "type": "page"})
         self.assertEqual(self.staff("/forms/save", {"form": nested})[0], 400)
 
+    def test_label_and_help_position(self):
+        fields = self.form()["fields"]
+        fields[1].update(labelPosition="top", helpPosition="inside")      # 氏名（文字）
+        fields[2].update(labelPosition="side", helpPosition="inside")     # チェック：説明は中に出せない
+        fields[4].update(labelPosition="side", helpPosition="above")      # 表：項目名はいつも上
+        fields[0].update(labelPosition="side")                             # 見出し
+        fields[3].update(labelPosition="left", helpPosition="below")      # ありえない値は使わない
+        form = self.form(fields=fields, encrypt=False, labelPosition="side", helpPosition="inside")
+        status, data = self.staff("/forms/save", {"form": form})
+        self.assertEqual(status, 200, data)
+        saved = data["form"]
+        self.assertEqual((saved["labelPosition"], saved["helpPosition"]), ("side", "inside"))
+        got = [(f.get("labelPosition"), f.get("helpPosition")) for f in saved["fields"]]
+        self.assertEqual(got, [(None, None), ("top", "inside"), ("side", None), (None, None), (None, None)])
+        status, data = self.staff("/forms/save", {"form": self.form(labelPosition="x", helpPosition=1)})
+        self.assertEqual((data["form"]["labelPosition"], data["form"]["helpPosition"]), ("top", "above"))
+        status, data = self.staff("/requests/add", {"formId": saved["id"], "code": "C001"})
+        status, data = self.post("/form/get", {"token": data["request"]["token"]})
+        self.assertEqual((data["labelPosition"], data["helpPosition"]), ("side", "inside"))
+
     def test_layout_answers(self):
         form = self.layout_form()
         form["fields"][0]["children"].pop()   # マイナンバーを外して暗号化なしで試す

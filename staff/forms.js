@@ -304,9 +304,9 @@ async function showSubmission(sub) {
   const { record, answers } = await openRecord(sub.id);
   const h = document.createElement('h3');
   h.textContent = `${record.code}　${formatDate(record.submitted)}`;
-  // 顧問先の画面と同じ並びで表示する（送信したときの項目で）
+  // 顧問先の画面と同じ並びで表示する（送信したときの項目で。項目名の位置は今の入力ページの設定）
   const grid = document.createElement('div');
-  FormRender.buildView(grid, record.fields, answers);
+  FormRender.buildView(grid, record.fields, answers, current);
   const close = button('閉じる', () => { subView.hidden = true; subView.replaceChildren(); }, 'button-outline');
   close.style.marginTop = '12px';
   subView.replaceChildren(h, grid, close);

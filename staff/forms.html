@@ -12,8 +12,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&family=Noto+Serif+JP:wght@500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
   <link rel="stylesheet" href="/staff/staff.css">
-  <link rel="stylesheet" href="/form/layout.css?v=20261008-3">
-  <link rel="stylesheet" href="/staff/forms.css?v=20261008-3">
+  <link rel="stylesheet" href="/form/layout.css?v=20261008-4">
+  <link rel="stylesheet" href="/staff/forms.css?v=20261008-4">
 </head>
 <body>
   <header class="site-header">
@@ -103,6 +103,21 @@
           <label class="check-line"><input type="checkbox" id="ed-pdf-border"> 顧問先が保存するPDFで、項目を枠で囲む</label>
           <p class="hint">外すと、項目名と入力内容だけを並べます（表の罫線と「枠」の部品は残ります）。</p>
         </div>
+        <div class="ed-row">
+          <label for="ed-label-position">項目名の位置</label>
+          <select id="ed-label-position" class="ed-select">
+            <option value="top">上（項目名の下に入力欄）</option>
+            <option value="side">横（左に項目名、右に入力欄）</option>
+          </select>
+        </div>
+        <div class="ed-row">
+          <label for="ed-help-position">説明の位置</label>
+          <select id="ed-help-position" class="ed-select">
+            <option value="above">入力欄の上</option>
+            <option value="inside">入力欄の中（薄い文字。入力を始めると消えます）</option>
+          </select>
+          <p class="hint">部品を選ぶと、右側の設定で項目ごとに変えられます。スマホでは項目名はいつも上になります。日付・選択肢・チェック・表の説明は、いつも入力欄の上に出ます。</p>
+        </div>
 
         <h3 class="ed-subtitle">レイアウト</h3>
         <p class="hint">部品を押して選ぶと、右側で設定を変えられます。ドラッグで並べ替えや枠への出し入れ、右端のつまみを左右に動かすと幅（横12マスのうち何マス使うか）を変えられます。スマホでは自動で縦1列になります。「ページ区切り」を置くと、顧問先の画面は「次へ」で1ページずつ進み、PDFもそこで改ページします。</p>
@@ -181,9 +196,9 @@
     </div>
   </footer>
 
-  <script src="/form/crypto.js?v=20261008-3"></script>
-  <script src="/form/render.js?v=20261008-3"></script>
-  <script src="/staff/forms.js?v=20261008-3"></script>
-  <script src="/staff/form-editor.js?v=20261008-3"></script>
+  <script src="/form/crypto.js?v=20261008-4"></script>
+  <script src="/form/render.js?v=20261008-4"></script>
+  <script src="/staff/forms.js?v=20261008-4"></script>
+  <script src="/staff/form-editor.js?v=20261008-4"></script>
 </body>
 </html>

@@ -26,7 +26,7 @@
 .staff.staff-wide { max-width: 1200px; }
 .ed-row { margin-bottom: 14px; }
 .ed-row > label { display: block; margin-bottom: 4px; font-weight: 700; }
-.ed-input, .ed-props input:not([type="checkbox"]), .ed-props select, .ed-props textarea, #request-code {
+.ed-input, .ed-select, .ed-props input:not([type="checkbox"]), .ed-props select, .ed-props textarea, #request-code {
   width: 100%;
   padding: 8px 10px;
   background: #fff;
@@ -34,6 +34,7 @@
   font-family: inherit;
   font-size: 0.95rem;
 }
+.ed-select { width: auto; max-width: 100%; }
 .ed-subtitle { margin: 24px 0 4px; font-size: 1.05rem; }
 .ed-palette { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; }
 .ed-palette-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }

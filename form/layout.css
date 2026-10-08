@@ -16,6 +16,11 @@
   border: 1px solid var(--line);
 }
 .f-field.has-error { border-color: #b3261e; }
+/* 項目名を横に置く（左に項目名、右に入力欄。項目名の幅はそろえる） */
+.f-field.is-side { display: grid; grid-template-columns: 9em minmax(0, 1fr); gap: 0 12px; align-items: start; }
+.f-field.is-side > .f-label { margin: 0; padding-top: 10px; }
+.f-field.is-view.is-side > .f-label { padding-top: 0; }
+.f-body { min-width: 0; }
 .f-label { display: block; margin: 0 0 6px; font-weight: 700; }
 .f-help { margin: 0 0 8px; color: #666; font-size: 0.9rem; white-space: pre-wrap; }
 .f-error { margin: 8px 0 0; color: #b3261e; font-size: 0.9rem; font-weight: 700; }
@@ -106,6 +111,8 @@
 @media screen and (max-width: 640px) {
   .fgrid > *, .fgrid > .is-new-row { grid-column: 1 / -1; }
   .fgrid > .f-spacer { display: none; }
+  .f-field.is-side { display: block; }
+  .f-field.is-side > .f-label { margin: 0 0 6px; padding-top: 0; }
   .f-table { table-layout: auto; }
   .f-table .f-input { min-width: 7em; }
 }

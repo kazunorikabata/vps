@@ -48,7 +48,7 @@ async function start() {
     const grid = document.createElement('div');
     box.append(grid);
     fieldsBox.append(box);
-    return { title: p.title, box, controls: FormRender.buildForm(grid, p.fields) };
+    return { title: p.title, box, controls: FormRender.buildForm(grid, p.fields, { layout: page }) };
   });
   controls = steps.flatMap((s) => s.controls);
   if (!preview) startDraft();
@@ -387,7 +387,7 @@ function buildPrintView(answers, submitted) {
   meta.className = 'print-meta';
   meta.textContent = `送信日時：${new Date(submitted).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}　送信先：蒲田和紀税理士事務所`;
   const grid = document.createElement('div');
-  FormRender.buildView(grid, page.fields, answers);
+  FormRender.buildView(grid, page.fields, answers, page);
   view.replaceChildren(h, meta, grid);
 }
 

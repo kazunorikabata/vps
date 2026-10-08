@@ -57,6 +57,7 @@
   .print-view .fgrid { gap: 6px 8px; }
   .print-view .f-field { padding: 4px 8px; border-color: #999; break-inside: avoid; }
   .print-view .f-label { margin: 0; font-size: 8.5pt; color: #555; }
+  .print-view .f-field.is-side { grid-template-columns: 8em minmax(0, 1fr); }
   .print-view .f-group { padding: 4px 8px 8px; break-inside: avoid; }
   .print-view .f-table th, .print-view .f-table td { padding: 3px 6px; border: 1px solid #999; font-size: 9pt; }
   /* ページ区切りごとに改ページ */

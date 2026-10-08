@@ -83,6 +83,11 @@ FIELD_TYPES = {"heading", "text", "textarea", "number", "date", "select", "check
 # 入力欄のない部品（見出し・区切り線・説明文・空白・枠・ページ区切り）
 LAYOUT_TYPES = {"heading", "divider", "note", "spacer", "group", "page"}
 NOTE_STYLES = {"normal", "bold", "warning"}
+# 項目名の位置（上・横）と説明の位置（入力欄の上・中）。入力ページ全体で決め、項目ごとにも変えられる
+LABEL_POSITIONS = {"top", "side"}
+HELP_POSITIONS = {"above", "inside"}
+# 説明を入力欄の中に出せる種類
+PLACEHOLDER_TYPES = {"text", "textarea", "number", "tel", "email", "zip", "mynumber"}
 MAX_FIELDS = 300
 COLUMN_TYPES = {"text", "number", "date", "mynumber"}
 
@@ -431,6 +436,11 @@ def check_field(f, ids, in_group=False):
         "width": check_int(f.get("width"), 1, 12, 12, "項目の幅は1〜12マスで指定してください。"),
         "newRow": f.get("newRow") is True,
     }
+    # 項目ごとの位置の設定（なければ入力ページの設定どおり）
+    if ftype not in LAYOUT_TYPES and ftype != "table" and f.get("labelPosition") in LABEL_POSITIONS:
+        field["labelPosition"] = f["labelPosition"]
+    if ftype in PLACEHOLDER_TYPES and f.get("helpPosition") in HELP_POSITIONS:
+        field["helpPosition"] = f["helpPosition"]
     if ftype == "note":
         field["style"] = f.get("style") if f.get("style") in NOTE_STYLES else "normal"
     if ftype == "page":
@@ -523,6 +533,8 @@ def check_form(form):
         "encrypt": encrypt,
         # 顧問先が保存する PDF で、項目を枠で囲むか
         "pdfBorder": form.get("pdfBorder") is not False,
+        "labelPosition": form.get("labelPosition") if form.get("labelPosition") in LABEL_POSITIONS else "top",
+        "helpPosition": form.get("helpPosition") if form.get("helpPosition") in HELP_POSITIONS else "above",
         "fields": fields,
     }
 
@@ -624,7 +636,10 @@ def handle_complete(body):
 def handle_form_get(body):
     _, form = find_request(body.get("token"))
     data = {k: form[k] for k in ("title", "description", "encrypt", "fields")}
-    data["pdfBorder"] = form.get("pdfBorder", True)   # 設定を作る前の入力ページは枠あり
+    # 設定を作る前の入力ページは、枠あり・項目名は上・説明は入力欄の上
+    data["pdfBorder"] = form.get("pdfBorder", True)
+    data["labelPosition"] = form.get("labelPosition", "top")
+    data["helpPosition"] = form.get("helpPosition", "above")
     if form["encrypt"]:
         key = public_key()
         if not key:

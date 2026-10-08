@@ -61,6 +61,14 @@ document.getElementById('ed-cancel').addEventListener('click', () => { editor.hi
 document.getElementById('ed-title').addEventListener('input', (e) => { editing.form.title = e.target.value; });
 document.getElementById('ed-description').addEventListener('input', (e) => { editing.form.description = e.target.value; });
 document.getElementById('ed-pdf-border').addEventListener('change', (e) => { editing.form.pdfBorder = e.target.checked; });
+// 項目名・説明の位置（入力ページ全体。項目ごとの設定があればそちらが優先）
+for (const key of ['labelPosition', 'helpPosition']) {
+  const id = key === 'labelPosition' ? 'ed-label-position' : 'ed-help-position';
+  document.getElementById(id).addEventListener('change', (e) => {
+    editing.form[key] = e.target.value;
+    renderAll();
+  });
+}
 edEncrypt.addEventListener('change', () => {
   editing.form.encrypt = edEncrypt.checked;
   showEncryptNote();
@@ -93,14 +101,17 @@ dropTarget(canvas, () => editing.form.fields, () => editing.form.fields.length, 
 function openEditor(form) {
   editing = form
     ? { id: form.id, form: structuredClone({ title: form.title, description: form.description, encrypt: form.encrypt,
-      pdfBorder: form.pdfBorder !== false, fields: form.fields }) }
-    : { id: null, form: { title: '', description: '', encrypt: true, pdfBorder: true, fields: [] } };
+      pdfBorder: form.pdfBorder !== false, labelPosition: form.labelPosition || 'top', helpPosition: form.helpPosition || 'above',
+      fields: form.fields }) }
+    : { id: null, form: { title: '', description: '', encrypt: true, pdfBorder: true, labelPosition: 'top', helpPosition: 'above', fields: [] } };
   for (const field of FormRender.iterFields(editing.form.fields)) prepareField(field);
   selectedId = null;
   document.getElementById('editor-title').textContent = form ? `「${form.title}」を編集` : '新しい入力ページ';
   document.getElementById('ed-title').value = editing.form.title;
   document.getElementById('ed-description').value = editing.form.description;
   document.getElementById('ed-pdf-border').checked = editing.form.pdfBorder;
+  document.getElementById('ed-label-position').value = editing.form.labelPosition;
+  document.getElementById('ed-help-position').value = editing.form.helpPosition;
   renderAll();
   editor.hidden = false;
   editor.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -226,7 +237,7 @@ function renderAll() {
 
 function renderCanvas() {
   canvas.replaceChildren();
-  FormRender.buildForm(canvas, editing.form.fields, { preview: true, decorate });
+  FormRender.buildForm(canvas, editing.form.fields, { preview: true, decorate, layout: editing.form });
   document.getElementById('ed-canvas-empty').hidden = editing.form.fields.length > 0;
   // 空の枠にも落とせるようにする
   for (const grid of canvas.querySelectorAll('.f-group > .fgrid')) {
@@ -409,6 +420,7 @@ function renderProps() {
     help.addEventListener('input', () => { field.help = help.value; renderCanvas(); });
     items.push(propRow('説明', help));
   }
+  if (FormRender.isInput(field)) items.push(...positionEditor(field));
 
   // 並べ方（ページ区切りはいつも全幅）
   if (field.type === 'page') {
@@ -483,8 +495,30 @@ function changeType(field, type) {
   if (type !== 'note') delete field.style;
   if (type !== 'group') delete field.children;
   if (!FormRender.isInput(field)) field.required = false;
+  if (!FormRender.isInput(field) || type === 'table') delete field.labelPosition;
+  if (!FormRender.canHelpInside(type)) delete field.helpPosition;
   prepareField(field);
   renderAll();
+}
+
+// 項目名・説明の位置（空＝入力ページの設定どおり）。表の項目名はいつも上、説明を中に出せない種類もある
+const LABEL_POSITIONS = { top: '上', side: '横' };
+const HELP_POSITIONS = { above: '入力欄の上', inside: '入力欄の中' };
+
+function positionEditor(field) {
+  const items = [];
+  const choice = (key, names, label) => {
+    const control = select({ '': `入力ページの設定どおり（${names[editing.form[key]]}）`, ...names }, field[key] || '', label);
+    control.addEventListener('change', () => {
+      if (control.value) field[key] = control.value;
+      else delete field[key];
+      renderCanvas();
+    });
+    items.push(propRow(label, control));
+  };
+  if (field.type !== 'table') choice('labelPosition', LABEL_POSITIONS, '項目名の位置');
+  if (FormRender.canHelpInside(field.type)) choice('helpPosition', HELP_POSITIONS, '説明の位置');
+  return items;
 }
 
 function optionsEditor(field) {

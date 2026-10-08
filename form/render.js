@@ -4,6 +4,8 @@
 // ページ区切り（page）があれば、顧問先の画面は1ページずつ進み、PDF もそこで改ページする
 const FormRender = (() => {
   const LAYOUT_TYPES = new Set(['heading', 'divider', 'note', 'spacer', 'group', 'page']);
+  // 説明を入力欄の中（薄い文字）に出せる種類
+  const PLACEHOLDER_TYPES = new Set(['text', 'textarea', 'number', 'tel', 'email', 'zip', 'mynumber']);
   const INPUTS = {
     text: { type: 'text' },
     number: { type: 'text', inputMode: 'decimal' },
@@ -108,14 +110,34 @@ const FormRender = (() => {
     return box;
   }
 
-  function fieldBox(field) {
+  // layout は入力ページの設定 { labelPosition: 'top'|'side', helpPosition: 'above'|'inside' }。
+  // 項目に同じ名前の設定があれば、そちらを使う。表の項目名はいつも上
+  function labelSide(field, layout = {}) {
+    return field.type !== 'table' && (field.labelPosition || layout.labelPosition) === 'side';
+  }
+
+  function canHelpInside(type) {
+    return PLACEHOLDER_TYPES.has(type);
+  }
+
+  function helpInside(field, layout = {}) {
+    return Boolean(field.help) && canHelpInside(field.type) && (field.helpPosition || layout.helpPosition) === 'inside';
+  }
+
+  // 項目名を横にするときは、入力欄・説明・エラーを右側の body にまとめる
+  function fieldBox(field, layout) {
     const box = el('div', 'f-field');
     const label = el(field.type === 'table' ? 'p' : 'label', 'f-label', field.label);
     if (field.type !== 'table' && field.type !== 'checkbox') label.htmlFor = `field-${field.id}`;
     if (field.required) label.append(' ', el('span', 'required-mark', '必須'));
     box.append(label);
-    if (field.help) box.append(el('p', 'f-help', field.help));
-    return box;
+    let body = box;
+    if (labelSide(field, layout)) {
+      box.classList.add('is-side');
+      body = box.appendChild(el('div', 'f-body'));
+    }
+    if (field.help && !helpInside(field, layout)) body.append(el('p', 'f-help', field.help));
+    return { box, body };
   }
 
   // withRemove：行を消す「×」の列を右端に付ける（行を追加できる表の入力画面）
@@ -160,13 +182,13 @@ const FormRender = (() => {
 
   // controls（入力欄の一覧）を返す。preview なら入力できない見本として作る（作成画面用）。
   // decorate(e, field, list, index) は、部品ごとの要素に手を加えるためのもの（作成画面でドラッグなどを付ける）
-  function buildForm(container, fields, { preview = false, decorate } = {}) {
+  function buildForm(container, fields, { preview = false, decorate, layout } = {}) {
     const controls = [];
     const build = (grid, list) => {
       list.forEach((field, index) => {
         let e;
         if (isInput(field)) {
-          const control = inputItem(field, preview);
+          const control = inputItem(field, preview, layout);
           controls.push(control);
           e = control.box;
         } else {
@@ -182,20 +204,21 @@ const FormRender = (() => {
     return controls;
   }
 
-  function inputItem(field, preview) {
-    const box = fieldBox(field);
+  function inputItem(field, preview, layout) {
+    const { box, body } = fieldBox(field, layout);
     const error = el('p', 'f-error');
     error.hidden = true;
     let control;
     if (field.type === 'table') {
-      control = tableInput(field, box, preview);
+      control = tableInput(field, body, preview);
     } else {
       const input = createInput(field);
+      if (helpInside(field, layout)) input.placeholder = field.help;
       if (preview) (input.checkbox || input).disabled = true;
-      box.append(input);
+      body.append(input);
       control = { field, input };
     }
-    box.append(error);
+    body.append(error);
     return { ...control, box, error };
   }
 
@@ -303,23 +326,23 @@ const FormRender = (() => {
   // --- 読むだけの表示（PDF と、事務所内ページで届いた内容を見るとき） ---
 
   // ページ区切りがあれば、ページごとに見出しを付けて分ける（PDF ではページごとに改ページ）
-  function buildView(container, fields, answers) {
+  function buildView(container, fields, answers, layout = {}) {
     const pages = splitPages(fields);
     if (pages.length === 1) {
-      viewGrid(container, pages[0].fields, answers);
+      viewGrid(container, pages[0].fields, answers, layout);
       return;
     }
     container.replaceChildren(...pages.map((page, i) => {
       const section = el('section', 'f-page');
       section.append(el('h2', 'f-page-title', `${i + 1} / ${pages.length}${page.title ? `　${page.title}` : ''}`));
       const grid = el('div');
-      viewGrid(grid, page.fields, answers);
+      viewGrid(grid, page.fields, answers, layout);
       section.append(grid);
       return section;
     }));
   }
 
-  function viewGrid(container, fields, answers) {
+  function viewGrid(container, fields, answers, layout) {
     const build = (grid, list) => {
       for (const field of list) {
         let e;
@@ -327,6 +350,7 @@ const FormRender = (() => {
           e = layoutItem(field, build);
         } else {
           e = el('div', 'f-field is-view');
+          if (labelSide(field, layout)) e.classList.add('is-side');
           e.append(el('p', 'f-label', field.label));
           const value = answers[field.id];
           if (field.type === 'table') e.append(viewTable(field, value || []));
@@ -362,5 +386,5 @@ const FormRender = (() => {
     return value == null ? '' : String(value);
   }
 
-  return { isInput, iterFields, splitPages, buildForm, buildView, tableRows, sums, parseNumber, formatNumber, displayValue };
+  return { isInput, iterFields, splitPages, canHelpInside, buildForm, buildView, tableRows, sums, parseNumber, formatNumber, displayValue };
 })();
