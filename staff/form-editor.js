@@ -24,7 +24,7 @@ const TYPES = {
 const LAYOUT_PALETTE = ['heading', 'divider', 'note', 'spacer', 'group', 'page'];
 // 枠の中に置けない部品（いちばん外の並びにだけ置ける）
 const TOP_ONLY = ['group', 'page'];
-const COLUMN_TYPES = { text: '文字', number: '数字・金額', date: '日付', mynumber: 'マイナンバー' };
+const COLUMN_TYPES = { text: '文字', number: '数字・金額', date: '日付', checkbox: 'チェック', mynumber: 'マイナンバー' };
 const NOTE_STYLES = { normal: '普通', bold: '太字', warning: '注意（赤）' };
 const WIDTHS = {
   12: '全幅（12マス）', 9: '4分の3（9マス）', 8: '3分の2（8マス）', 6: '半分（6マス）',

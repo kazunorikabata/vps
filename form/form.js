@@ -205,7 +205,7 @@ function fillDraft(values) {
       [...c.body.rows].forEach((tr, i) => {
         for (const input of tr.querySelectorAll('input[data-col]')) {
           const col = c.field.columns.find((x) => x.id === input.dataset.col);
-          if (col.type !== 'mynumber') input.value = (value[i] || {})[col.id] || '';
+          if (col.type !== 'mynumber') FormRender.setCellValue(input, (value[i] || {})[col.id] || '');
         }
       });
       if (c.updateSum) c.updateSum(FormRender.tableRows(c, true));
@@ -305,7 +305,7 @@ function inputValue(c) {
 function tableValue(c) {
   for (const input of c.body.querySelectorAll('input[data-col]')) {
     const col = c.field.columns.find((x) => x.id === input.dataset.col);
-    input.value = normalize(col.type, input.value);
+    if (col.type !== 'checkbox') input.value = normalize(col.type, input.value);
   }
   return FormRender.tableRows(c);
 }

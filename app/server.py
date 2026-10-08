@@ -89,7 +89,7 @@ HELP_POSITIONS = {"above", "inside"}
 # 説明を入力欄の中に出せる種類
 PLACEHOLDER_TYPES = {"text", "textarea", "number", "tel", "email", "zip", "mynumber"}
 MAX_FIELDS = 300
-COLUMN_TYPES = {"text", "number", "date", "mynumber"}
+COLUMN_TYPES = {"text", "number", "date", "checkbox", "mynumber"}
 
 log = logging.getLogger("upload")
 

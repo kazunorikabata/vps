@@ -62,7 +62,7 @@
 .ed-item.drop-before { box-shadow: -4px 0 0 var(--accent); }
 .ed-item.drop-after { box-shadow: 4px 0 0 var(--accent); }
 /* 見本の入力欄は押せないようにして、押したら部品が選ばれるようにする */
-.ed-canvas .f-input, .ed-canvas .f-check, .ed-canvas .row-button, .ed-canvas .row-remove { pointer-events: none; }
+.ed-canvas .f-input, .ed-canvas .f-cell-check, .ed-canvas .f-check, .ed-canvas .row-button, .ed-canvas .row-remove { pointer-events: none; }
 .ed-canvas .f-spacer, .ed-canvas .f-divider { min-height: 48px; }
 .ed-canvas .f-spacer { border: 1px dashed #b9b0a1; background: repeating-linear-gradient(45deg, transparent 0 6px, rgba(0, 0, 0, 0.03) 6px 12px); }
 .ed-canvas .f-group > .fgrid { min-height: 60px; }

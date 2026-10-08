@@ -286,8 +286,13 @@ const FormRender = (() => {
     if (rowLabel != null) tr.append(el('th', 'f-rowlabel', rowLabel));
     for (const col of field.columns) {
       const input = el('input');
-      Object.assign(input, INPUTS[col.type] || INPUTS.text);
-      input.className = 'f-input';
+      if (col.type === 'checkbox') {
+        input.type = 'checkbox';
+        input.className = 'f-cell-check';
+      } else {
+        Object.assign(input, INPUTS[col.type] || INPUTS.text);
+        input.className = 'f-input';
+      }
       input.dataset.col = col.id;
       input.disabled = preview;
       input.setAttribute('aria-label', rowLabel ? `${rowLabel} ${col.label}` : col.label);
@@ -309,6 +314,17 @@ const FormRender = (() => {
     }
   }
 
+  // 表のマスの値。チェックの列は、入っていれば「はい」、なければ空（ほかの列と同じく文字で残す）
+  function cellValue(input) {
+    if (input.type === 'checkbox') return input.checked ? 'はい' : '';
+    return input.value;
+  }
+
+  function setCellValue(input, value) {
+    if (input.type === 'checkbox') input.checked = value === 'はい';
+    else input.value = value;
+  }
+
   // 表の入力内容。行数が決まった表は、行の名前とずれないように空の行も残す（すべて空なら []）
   function tableRows(control, keepEmpty = control.fixed) {
     const rows = [];
@@ -317,8 +333,8 @@ const FormRender = (() => {
       const row = {};
       let filled = false;
       for (const input of tr.querySelectorAll('input[data-col]')) {
-        row[input.dataset.col] = input.value;
-        if (input.value) filled = true;
+        row[input.dataset.col] = cellValue(input);
+        if (row[input.dataset.col]) filled = true;
       }
       if (filled) any = true;
       if (filled || keepEmpty) rows.push(row);
@@ -394,5 +410,5 @@ const FormRender = (() => {
     return value == null ? '' : String(value);
   }
 
-  return { isInput, iterFields, splitPages, canHelpInside, buildForm, buildView, tableRows, sums, parseNumber, formatNumber, displayValue };
+  return { isInput, iterFields, splitPages, canHelpInside, buildForm, buildView, tableRows, setCellValue, sums, parseNumber, formatNumber, displayValue };
 })();

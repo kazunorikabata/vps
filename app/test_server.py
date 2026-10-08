@@ -544,6 +544,16 @@ class FormTest(unittest.TestCase):
         fields[1]["label"] = ""          # 表示しなくても項目名は必要
         self.assertEqual(self.staff("/forms/save", {"form": self.form(fields=fields)})[0], 400)
 
+    def test_table_checkbox_column(self):
+        fields = self.form()["fields"]
+        fields[4]["columns"].append({"id": "live", "type": "checkbox", "label": "同居", "sum": True})
+        form_id, token = self.make_request(encrypt=False, fields=fields)
+        status, data = self.staff("/forms/list", {})
+        col = data["forms"][0]["fields"][4]["columns"][2]
+        self.assertEqual((col["type"], col["sum"]), ("checkbox", False))   # 合計は数字の列だけ
+        answers = {"name": "ダミー", "family": [{"name": "ダミー花子", "birth": "", "live": "はい"}, {"live": ""}]}
+        self.assertEqual(self.post("/form/submit", {"token": token, "answers": answers})[0], 200)
+
     def test_layout_answers(self):
         form = self.layout_form()
         form["fields"][0]["children"].pop()   # マイナンバーを外して暗号化なしで試す
