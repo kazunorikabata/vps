@@ -585,7 +585,7 @@ function tableEditor(field) {
     fixed ? 'fixed' : 'add', '表の形式');
   mode.addEventListener('change', () => {
     if (mode.value === 'fixed') field.rowLabels = Array.from({ length: Math.min(field.maxRows, 12) }, (_, i) => `${i + 1}`);
-    else delete field.rowLabels;
+    else { delete field.rowLabels; delete field.rowLabelWidth; }
     renderAll();
   });
   items.push(propRow('表の形式', mode));
@@ -599,6 +599,15 @@ function tableEditor(field) {
       renderCanvas();
     });
     items.push(propRow('行の名前（1行に1つ・50行まで）', labels));
+    // 行の名前の列の幅（空なら表の15%。数字を選ぶと、下の列の幅と同じ比で決まる）
+    const widths = { '': '自動（表の15%）', ...Object.fromEntries(Array.from({ length: 10 }, (_, n) => [n + 1, `幅${n + 1}`])) };
+    const labelWidth = select(widths, String(field.rowLabelWidth || ''), '行の名前の列の幅');
+    labelWidth.addEventListener('change', () => {
+      if (labelWidth.value) field.rowLabelWidth = Number(labelWidth.value);
+      else delete field.rowLabelWidth;
+      renderCanvas();
+    });
+    items.push(propRow('行の名前の列の幅（列の幅と同じ比）', labelWidth));
   } else {
     const max = document.createElement('input');
     max.type = 'number';

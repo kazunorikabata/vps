@@ -148,10 +148,12 @@ const FormRender = (() => {
   // withRemove：行を消す「×」の列を右端に付ける（行を追加できる表の入力画面）
   function tableHead(field, table, withRemove = false) {
     const colgroup = el('colgroup');
-    // 列の幅は、ほかの列との比で割り振る（行の名前の列は 15%、「×」の列は 8%）
-    const room = 100 - (field.rowLabels ? 15 : 0) - (withRemove ? 8 : 0);
-    if (field.rowLabels) colgroup.appendChild(el('col')).style.width = '15%';
-    const total = field.columns.reduce((t, c) => t + (c.width || 1), 0);
+    // 列の幅は、ほかの列との比で割り振る（「×」の列は 8%）。
+    // 行の名前の列は、rowLabelWidth があればほかの列と同じ比で、なければ 15%
+    const labelRatio = field.rowLabels && field.rowLabelWidth ? field.rowLabelWidth : 0;
+    const room = 100 - (field.rowLabels && !labelRatio ? 15 : 0) - (withRemove ? 8 : 0);
+    const total = field.columns.reduce((t, c) => t + (c.width || 1), 0) + labelRatio;
+    if (field.rowLabels) colgroup.appendChild(el('col')).style.width = labelRatio ? `${(labelRatio / total) * room}%` : '15%';
     for (const col of field.columns) {
       const c = el('col');
       c.style.width = `${((col.width || 1) / total) * room}%`;

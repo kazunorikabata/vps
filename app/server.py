@@ -542,6 +542,10 @@ def check_table(f, field):
             raise UploadError(400, f"「{field['label']}」の行の名前は50行までです。")
         field["rowLabels"] = [text(r, 100, "行の名前", required=True) for r in row_labels]
         field["maxRows"] = len(field["rowLabels"])
+        # 行の名前の列の幅（列の幅と同じ比。なければ表の15%）
+        label_width = check_int(f.get("rowLabelWidth"), 1, 10, None, "行の名前の列の幅は1〜10で指定してください。")
+        if label_width:
+            field["rowLabelWidth"] = label_width
     else:
         field["maxRows"] = check_int(f.get("maxRows"), 1, 50, None, f"「{field['label']}」の行数は1〜50で入力してください。")
         if field["maxRows"] is None:

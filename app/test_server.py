@@ -668,6 +668,17 @@ class FormTest(unittest.TestCase):
         fields[4]["columns"][2]["options"] = []
         self.assertEqual(self.staff("/forms/save", {"form": self.form(fields=fields)})[0], 400)
 
+    def test_row_label_width(self):
+        form = self.layout_form()
+        form["fields"][4]["rowLabelWidth"] = 2
+        status, data = self.staff("/forms/save", {"form": form})
+        self.assertEqual(data["form"]["fields"][4]["rowLabelWidth"], 2)
+        del form["fields"][4]["rowLabelWidth"]
+        status, data = self.staff("/forms/save", {"form": form})
+        self.assertNotIn("rowLabelWidth", data["form"]["fields"][4])
+        form["fields"][4]["rowLabelWidth"] = 11
+        self.assertEqual(self.staff("/forms/save", {"form": form})[0], 400)
+
     def test_layout_answers(self):
         form = self.layout_form()
         form["fields"][0]["children"].pop()   # マイナンバーを外して暗号化なしで試す

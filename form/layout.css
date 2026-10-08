@@ -94,7 +94,7 @@
 .f-table thead th { font-size: 0.85rem; }
 .f-table .f-input { min-width: 0; padding: 8px; }
 .f-cell-check { display: block; width: 20px; height: 20px; margin: 0 auto; }
-.f-rowlabel { background: #f6f2ea; font-weight: 700; white-space: nowrap; }
+.f-rowlabel { background: #f6f2ea; font-weight: 700; white-space: normal; word-break: break-all; }
 .f-sum th, .f-sum td { background: #f6f2ea; font-weight: 700; text-align: right; }
 .f-sum th { text-align: left; }
 .row-button {
