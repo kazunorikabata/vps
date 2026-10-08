@@ -11,24 +11,36 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&family=Noto+Serif+JP:wght@500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
-  <link rel="stylesheet" href="/staff/staff.css">
-  <link rel="stylesheet" href="/form/layout.css?v=20261008-10">
-  <link rel="stylesheet" href="/staff/forms.css?v=20261008-10">
+  <link rel="stylesheet" href="/staff/staff.css?v=20261008-11">
+  <link rel="stylesheet" href="/form/layout.css?v=20261008-11">
+  <link rel="stylesheet" href="/staff/forms.css?v=20261008-11">
 </head>
 <body>
   <header class="site-header">
     <div class="container header-inner">
       <a href="/staff/" class="logo">蒲田和紀税理士事務所</a>
       <div class="staff-header-right">
-        <a href="/staff/" class="staff-home-link">顧問先の管理へ</a>
+        <a href="/" class="staff-home-link">ホームページへ</a>
         <span class="staff-badge">事務所内</span>
       </div>
     </div>
   </header>
 
   <main class="section">
-    <div class="container staff staff-wide">
-      <h1 class="section-title">入力ページの管理</h1>
+    <div class="container staff-layout">
+      <nav class="staff-sidebar" aria-label="事務所内のメニュー">
+        <p class="staff-sidebar-group">顧問先の管理</p>
+        <a href="/staff/" data-nav="clients">顧問先の登録・URL</a>
+        <a href="/staff/forms.html" data-nav="forms">顧問先用の入力ページ</a>
+        <p class="staff-sidebar-group">事務所の管理</p>
+        <a href="/staff/forms.html?kind=office" data-nav="office">事務所用の入力ページ</a>
+        <p class="staff-sidebar-group">サイトの修正</p>
+        <a href="/staff/site.html" data-nav="site">Claude Code の会話</a>
+      </nav>
+
+    <div class="staff staff-wide">
+      <!-- 顧問先用と事務所用（?kind=office）で同じページを使う。見出しなどは forms.js で切り替える -->
+      <h1 id="page-title" class="section-title">顧問先用の入力ページ</h1>
 
       <p id="message" class="staff-message" role="status" hidden></p>
 
@@ -72,11 +84,12 @@
       <!-- 入力ページの一覧 -->
       <section class="staff-card">
         <h2>入力ページ</h2>
+        <p id="kind-note" class="hint kind-note"></p>
         <button type="button" id="new-form" class="button">新しい入力ページを作る</button>
         <div class="table-wrap">
           <table class="clients-table">
             <thead>
-              <tr><th>名前</th><th>暗号化</th><th>項目</th><th>依頼</th><th>更新</th><th>操作</th></tr>
+              <tr><th>名前</th><th>暗号化</th><th>項目</th><th id="forms-count-head">依頼</th><th>更新</th><th>操作</th></tr>
             </thead>
             <tbody id="forms"></tbody>
           </table>
@@ -88,7 +101,7 @@
       <section id="editor" class="staff-card" hidden>
         <h2 id="editor-title"></h2>
         <div class="ed-row">
-          <label for="ed-title">名前（顧問先に表示されます）</label>
+          <label for="ed-title">名前（入力画面に表示されます）</label>
           <input id="ed-title" class="ed-input" maxlength="100">
         </div>
         <div class="ed-row">
@@ -100,7 +113,7 @@
           <p id="ed-encrypt-note" class="hint"></p>
         </div>
         <div class="ed-row">
-          <label class="check-line"><input type="checkbox" id="ed-pdf-border"> 顧問先が保存するPDFで、項目を枠で囲む</label>
+          <label class="check-line"><input type="checkbox" id="ed-pdf-border"> 入力したあとに保存するPDFで、項目を枠で囲む</label>
           <p class="hint">外すと、項目名と入力内容だけを並べます（表の罫線と「枠」の部品は残ります）。</p>
         </div>
         <div class="ed-row">
@@ -172,13 +185,13 @@
       <section id="submissions" class="staff-card" hidden>
         <h2 id="submissions-title"></h2>
         <div class="sub-toolbar">
-          <label class="check-line"><input type="checkbox" id="sub-latest" checked> 顧問先ごとに最新の1件だけ</label>
+          <label id="sub-latest-line" class="check-line"><input type="checkbox" id="sub-latest" checked> 顧問先ごとに最新の1件だけ</label>
           <button type="button" id="sub-csv" class="button">CSVで書き出す</button>
         </div>
         <p class="hint">書き出したCSVは暗号化されていません。事務所のPCの決まった場所に保存し、使い終わったら削除してください。</p>
         <div class="table-wrap">
           <table class="clients-table">
-            <thead><tr><th>顧問先</th><th>送信日時</th><th>操作</th></tr></thead>
+            <thead><tr><th id="sub-who-head">顧問先</th><th>送信日時</th><th>操作</th></tr></thead>
             <tbody id="sub-list"></tbody>
           </table>
         </div>
@@ -187,18 +200,19 @@
         <button type="button" id="sub-close" class="button button-outline">閉じる</button>
       </section>
     </div>
+    </div>
   </main>
 
   <footer class="site-footer">
     <div class="container">
-      <p class="footer-staff"><a href="/staff/">顧問先の管理に戻る</a></p>
+      <p class="footer-staff"><a href="/">ホームページに戻る</a></p>
       <p><small>&copy; 蒲田和紀税理士事務所</small></p>
     </div>
   </footer>
 
-  <script src="/form/crypto.js?v=20261008-10"></script>
-  <script src="/form/render.js?v=20261008-10"></script>
-  <script src="/staff/forms.js?v=20261008-10"></script>
-  <script src="/staff/form-editor.js?v=20261008-10"></script>
+  <script src="/form/crypto.js?v=20261008-11"></script>
+  <script src="/form/render.js?v=20261008-11"></script>
+  <script src="/staff/forms.js?v=20261008-11"></script>
+  <script src="/staff/form-editor.js?v=20261008-11"></script>
 </body>
 </html>

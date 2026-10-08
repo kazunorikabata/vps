@@ -1,6 +1,8 @@
 // 事務所内ページ：入力ページの作成・顧問先へのURLの発行・届いた入力内容の確認と書き出し
 // 暗号化した入力内容は、このページに読み込んだ秘密鍵で、このブラウザの中だけで復号する
 // 入力ページの作成画面は form-editor.js、部品の表示は /form/render.js（顧問先の画面と共通）
+// 顧問先用（URL を発行して顧問先が入力）と事務所用（?kind=office。職員が事務所内ページで入力）で同じページを使う
+const formKind = new URLSearchParams(location.search).get('kind') === 'office' ? 'office' : 'client';
 const staff = document.querySelector('.staff');
 const message = document.getElementById('message');
 
@@ -11,7 +13,31 @@ let pendingKey = null;      // 作ったばかりで、まだ登録していな�
 let current = null;         // 依頼URL・入力内容を表示している入力ページ
 let submissions = [];
 
+showKind();
 run(loadForms);
+
+function showKind() {
+  const office = formKind === 'office';
+  const title = office ? '事務所用の入力ページ' : '顧問先用の入力ページ';
+  document.title = `${title}｜蒲田和紀税理士事務所`;
+  document.getElementById('page-title').textContent = title;
+  const current = document.querySelector(`.staff-sidebar [data-nav="${office ? 'office' : 'forms'}"]`);
+  current.classList.add('is-current');
+  current.setAttribute('aria-current', 'page');
+  document.getElementById('kind-note').textContent = office
+    ? '報告書など、職員が外出先などからこのページで入力するためのページです。「入力する」から入力します。入力した内容はドライブの「事務所の記録」フォルダに保存され、入力した職員のIDも残ります。'
+    : '顧問先に入力してもらうページです。「依頼URL」で顧問先ごとのURLを発行し、届いた内容は顧問先のドライブのフォルダに保存されます。';
+  document.getElementById('forms-count-head').textContent = office ? '' : '依頼';
+  document.getElementById('sub-who-head').textContent = office ? '入力した職員' : '顧問先';
+  // 事務所用は顧問先ごとに分けないので、「最新の1件だけ」は使わない
+  document.getElementById('sub-latest').checked = !office;
+  document.getElementById('sub-latest-line').hidden = office;
+}
+
+// 届いた内容を誰が送ったか（顧問先用は顧問先の番号、事務所用は入力した職員）
+function senderOf(item) {
+  return formKind === 'office' ? (item.staff || '-') : item.code;
+}
 
 // --- 暗号化の鍵 ---
 
@@ -117,7 +143,7 @@ function showKey() {
 
 async function loadForms() {
   const data = await api('forms/list');
-  forms = data.forms;
+  forms = data.forms.filter((f) => (f.kind || 'client') === formKind);
   registeredKey = data.key;
   showKey();
   const tbody = document.getElementById('forms');
@@ -133,14 +159,16 @@ function formRow(form) {
   const ops = document.createElement('td');
   ops.className = 'ops';
   tr.append(cell(form.title), cell(enc), cell(String([...FormRender.iterFields(form.fields)].filter(FormRender.isInput).length)),
-    cell(String(form.requests)), cell(form.updated), ops);
+    cell(formKind === 'office' ? '' : String(form.requests)), cell(form.updated), ops);
   showFormOps(ops, form);
   return tr;
 }
 
 function showFormOps(td, form) {
   td.replaceChildren(
-    button('依頼URL', () => run(() => openRequests(form))),
+    formKind === 'office'
+      ? button('入力する', () => { location.href = `/staff/entry.html#${form.id}`; })
+      : button('依頼URL', () => run(() => openRequests(form))),
     button('届いた内容', () => run(() => openSubmissions(form))),
     button('編集', () => openEditor(form)),
     button('削除', () => askConfirm(td,
@@ -268,7 +296,7 @@ function renderSubmissions() {
     ops.className = 'ops';
     const show = () => ops.replaceChildren(
       button('表示', () => run(() => showSubmission(sub))),
-      button('削除', () => askConfirm(ops, `${sub.code}（${formatDate(sub.submitted)}）の入力内容を削除しますか？ 添付ファイルも一緒に、ドライブのゴミ箱に移り、30日後に完全に削除されます。`,
+      button('削除', () => askConfirm(ops, `${senderOf(sub)}（${formatDate(sub.submitted)}）の入力内容を削除しますか？ 添付ファイルも一緒に、ドライブのゴミ箱に移り、30日後に完全に削除されます。`,
         '削除する', async () => {
           await api('submissions/remove', { id: sub.id });
           submissions = submissions.filter((s) => s !== sub);
@@ -279,7 +307,7 @@ function renderSubmissions() {
         }, show), 'button-danger'),
     );
     show();
-    tr.append(cell(sub.code), cell(formatDate(sub.submitted)), ops);
+    tr.append(cell(senderOf(sub)), cell(formatDate(sub.submitted)), ops);
     return tr;
   }));
   document.getElementById('sub-empty').hidden = list.length > 0;
@@ -303,7 +331,7 @@ async function openRecord(id) {
 async function showSubmission(sub) {
   const { record, answers } = await openRecord(sub.id);
   const h = document.createElement('h3');
-  h.textContent = `${record.code}　${formatDate(record.submitted)}`;
+  h.textContent = `${senderOf(record)}　${formatDate(record.submitted)}`;
   // 顧問先の画面と同じ並びで表示する（送信したときの項目で。項目名の位置は今の入力ページの設定）
   const grid = document.createElement('div');
   FormRender.buildView(grid, record.fields, answers, current, {
@@ -367,7 +395,7 @@ async function exportCsv() {
       rowNames[field.id] = Array.from({ length: count }, (_, n) => `${n + 1}_`);
     }
   }
-  const header = ['顧問先', '送信日時'];
+  const header = [formKind === 'office' ? '入力した職員' : '顧問先', '送信日時'];
   for (const field of fields) {
     if (field.type !== 'table') {
       header.push(field.label);
@@ -380,7 +408,7 @@ async function exportCsv() {
   }
   const lines = [header];
   for (const { record, answers } of records) {
-    const line = [record.code, formatDate(record.submitted)];
+    const line = [senderOf(record), formatDate(record.submitted)];
     for (const field of fields) {
       if (field.type !== 'table') {
         line.push(FormRender.displayValue(field, answers[field.id]));

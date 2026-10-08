@@ -17,8 +17,9 @@
   - `app/server.py`：Google ドライブの再開可能アップロードの受付口を発行し、送信後に先頭バイトで中身を確認する。ファイル本体は VPS を通らない
   - ドライブへは事務所アカウントの OAuth（スコープは `drive.file`）で接続する。権限を広げないこと
   - VPS 上の配置：プログラムは `/opt/kabaoffice-upload/`、ログイン情報は `/etc/kabaoffice-upload/`（読まない）、顧問先の対応表は `/var/lib/kabaoffice-upload/`。nginx の `/api/upload/` から `127.0.0.1:8081` に転送する
-- 事務所内ページ：`staff/`（顧問先の追加・削除・URL再発行・QRコード）。nginx のベーシック認証（`/etc/nginx/kabaoffice-staff.htpasswd`、職員が自分で登録する）をかけ、`/api/staff/` から別ポート `127.0.0.1:8082` に転送する。顧問先用の入口から管理の機能に届かないよう、ポートを分けている
+- 事務所内ページ：`staff/`。左のサイドバー（各 HTML に同じものを置く）で、顧問先の登録・URL（`index.html`）、顧問先用の入力ページ（`forms.html`）、事務所用の入力ページ（`forms.html?kind=office`）、サイトの修正（`site.html`）を切り替える。nginx のベーシック認証（`/etc/nginx/kabaoffice-staff.htpasswd`、職員が自分で登録する）をかけ、`/api/staff/` から別ポート `127.0.0.1:8082` に転送する。顧問先用の入口から管理の機能に届かないよう、ポートを分けている
 - 入力ページ：`form/`（顧問先用。URL の `#` 以降が顧問先×入力ページごとの鍵）と `staff/forms.html`（作成・URL発行・確認・CSV書き出し）
+  - 事務所用（`kind: office`）は URL を発行せず、職員が `staff/entry.html#入力ページの番号` で入力する（`form/form.js` を `data-mode="office"` で使い、`/api/staff/office/` に送る）。保存先はドライブの「事務所の記録」フォルダで、入力した職員（ベーシック認証のユーザー名）を残す
   - 入力内容は顧問先のブラウザで事務所の公開鍵により暗号化し（`form/crypto.js`。RSA-OAEP 4096 + AES-GCM）、`/api/form/` → `127.0.0.1:8081/form/` を通って顧問先のドライブのフォルダに JSON で保存する。VPS に入力内容は残さない
   - 秘密鍵は職員のブラウザで作り、パスワードで暗号化したファイルとして職員が保管する。VPS・ドライブ・リポジトリに置かない。復号は `staff/forms.html` の中だけで行う
   - 入力ページごとに暗号化を外せるが、マイナンバーの項目があるものは外せない（サーバーでも確認）

@@ -322,7 +322,7 @@ class FormTest(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.dir.cleanup)
-        for name in ("CLIENTS_FILE", "FORMS_FILE", "REQUESTS_FILE", "KEY_FILE"):
+        for name in ("CLIENTS_FILE", "FORMS_FILE", "REQUESTS_FILE", "KEY_FILE", "OFFICE_FILE"):
             p = mock.patch.object(server, name, os.path.join(self.dir.name, name.lower()))
             p.start()
             self.addCleanup(p.stop)
@@ -679,6 +679,67 @@ class FormTest(unittest.TestCase):
         form["fields"][4]["rowLabelWidth"] = 11
         self.assertEqual(self.staff("/forms/save", {"form": form})[0], 400)
 
+    # --- 事務所用の入力ページ ---
+
+    def office_form(self, **kw):
+        status, data = self.staff("/forms/save", {"form": self.form(kind="office", encrypt=False, **kw)})
+        self.assertEqual(status, 200, data)
+        self.assertEqual(data["form"]["kind"], "office")
+        return data["form"]["id"]
+
+    def staff_as(self, path, body, user="tanaka"):
+        conn = http.client.HTTPConnection("127.0.0.1", self.ports["staff"])
+        conn.request("POST", path, json.dumps(body),
+                     {"Content-Type": "application/json", "Origin": ORIGIN, "X-Staff-User": user})
+        res = conn.getresponse()
+        data = json.loads(res.read())
+        conn.close()
+        return res.status, data
+
+    def test_office_form_kind(self):
+        status, data = self.staff("/forms/save", {"form": self.form()})
+        self.assertEqual(data["form"]["kind"], "client")   # 指定がなければ顧問先用
+        status, data = self.staff("/forms/save", {"form": self.form(kind="other")})
+        self.assertEqual(data["form"]["kind"], "client")
+        form_id = self.office_form()
+        # 事務所用には URL を発行できない。顧問先用の入口からは使えない
+        self.assertEqual(self.staff("/requests/add", {"formId": form_id, "code": "C001"})[0], 400)
+        self.assertEqual(self.post("/office/get", {"formId": form_id})[0], 404)
+
+    def test_office_submit(self):
+        form_id = self.office_form()
+        with mock.patch.object(server, "create_folder", return_value="officeFolder01") as create:
+            status, data = self.staff_as("/office/get", {"formId": form_id})
+            self.assertEqual((status, data["title"]), (200, "年末調整の確認"))
+            body = {"formId": form_id, "answers": {"name": "ダミー"}, "_staff": "なりすまし"}
+            self.assertEqual(self.staff_as("/office/submit", body)[0], 200)
+            self.assertEqual(self.staff_as("/office/submit", body, user="sato")[0], 200)
+        create.assert_called_once_with("事務所の記録")   # フォルダは一度だけ作る
+        folder, name, record, props = self.drive["create_json_file"].call_args.args
+        self.assertEqual(folder, "officeFolder01")
+        self.assertEqual((record["code"], record["staff"], record["answers"]), ("事務所", "sato", {"name": "ダミー"}))
+        self.assertEqual(props, {"kabaForm": form_id, "kabaCode": "事務所", "kabaStaff": "sato"})
+        # 顧問先用の入力ページは、事務所用の入口から使えない
+        status, data = self.staff("/forms/save", {"form": self.form(encrypt=False)})
+        self.assertEqual(self.staff_as("/office/get", {"formId": data["form"]["id"]})[0], 404)
+        self.assertEqual(self.staff_as("/office/submit", {"formId": data["form"]["id"], "answers": {}})[0], 404)
+
+    def test_office_files(self):
+        fields = self.file_form()
+        status, data = self.staff("/forms/save", {"form": self.form(kind="office", fields=fields)})
+        form_id = data["form"]["id"]
+        with open(server.OFFICE_FILE, "w", encoding="utf-8") as f:
+            json.dump({"folder_id": "officeFolder01"}, f)
+        body = {"formId": form_id, "fieldId": "docs", "size": 1000, "batch": "b" * 20}
+        self.assertEqual(self.staff_as("/office/file-session", body)[0], 200)
+        folder, name, mime, size, props = self.drive["create_upload_session"].call_args.args
+        self.assertEqual((folder, props["kabaCode"]), ("officeFolder01", "事務所"))
+        self.drive["get_file"].return_value = {"id": "file123456", "size": "1000", "parents": ["officeFolder01"],
+                                               "appProperties": {"kabaFileOf": form_id}}
+        self.assertEqual(self.staff_as("/office/file-complete", {"formId": form_id, "fileId": "file123456"})[0], 200)
+        self.drive["get_file"].return_value["parents"] = [FOLDER]   # 顧問先のフォルダのファイルは扱わない
+        self.assertEqual(self.staff_as("/office/file-complete", {"formId": form_id, "fileId": "file123456"})[0], 404)
+
     def test_layout_answers(self):
         form = self.layout_form()
         form["fields"][0]["children"].pop()   # マイナンバーを外して暗号化なしで試す
@@ -720,7 +781,7 @@ class FormTest(unittest.TestCase):
         self.drive["list_form_files"].return_value = [
             {"id": "file123456", "createdTime": "2026-10-07T01:00:00Z", "appProperties": {"kabaCode": "C001"}}]
         status, data = self.staff("/submissions/list", {"formId": "f000000000000"})
-        self.assertEqual(data["submissions"], [{"id": "file123456", "code": "C001", "submitted": "2026-10-07T01:00:00Z"}])
+        self.assertEqual(data["submissions"], [{"id": "file123456", "code": "C001", "staff": "", "submitted": "2026-10-07T01:00:00Z"}])
         self.assertEqual(self.staff("/submissions/get", {"id": "file123456"}), (200, {"record": {"version": 1}}))
         self.assertEqual(self.staff("/submissions/remove", {"id": "file123456"})[0], 200)
         self.drive["trash_file"].assert_called_once_with("file123456")

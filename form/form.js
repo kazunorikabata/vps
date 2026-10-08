@@ -6,6 +6,11 @@
 const NETWORK_ERROR = '通信できませんでした。電波の良い場所で再度お試しください';
 
 const token = location.hash.slice(1);
+// 事務所内ページの事務所用の入力ページ（staff/entry.html）。URL の # 以降は入力ページの番号で、
+// 送り先は事務所内の API（職員のIDとパスワードで保護。保存先は「事務所の記録」フォルダ）
+const office = document.body.dataset.mode === 'office';
+const API_BASE = office ? '/api/staff/office/' : '/api/form/';
+const who = office ? { formId: token } : { token };
 // 事務所内ページの作成画面の「プレビュー」から開いたとき。項目は作成画面から受け取り、送信はしない
 const preview = token === 'preview';
 const form = document.getElementById('entry-form');
@@ -28,8 +33,10 @@ async function start() {
     if (preview) {
       page = previewForm();
     } else {
-      if (!/^[A-Za-z0-9_-]{20,128}$/.test(token)) throw new Error('このURLは無効です。事務所にお問い合わせください。');
-      page = await api('get', { token });
+      if (office ? !/^f[0-9a-f]{12}$/.test(token) : !/^[A-Za-z0-9_-]{20,128}$/.test(token)) {
+        throw new Error(office ? '入力ページが見つかりません。' : 'このURLは無効です。事務所にお問い合わせください。');
+      }
+      page = await api('get', who);
       if (page.encrypt && !FormCrypto.supported()) {
         throw new Error('お使いのブラウザでは送信できません。最新のブラウザ（Chrome、Safari、Edge など）でお試しください。');
       }
@@ -124,7 +131,7 @@ form.addEventListener('submit', async (event) => {
         answers[c.field.id] = answers[c.field.id].map((f) => ({ name: f.name, size: f.size, type: f.type }));
       }
     } else {
-      const body = { token };
+      const body = { ...who };
       const batch = await sendFiles(answers);
       if (batch) body.batch = batch;
       sendButton.textContent = '送信しています…';
@@ -165,9 +172,9 @@ async function sendFiles(answers) {
       done += 1;
       sendButton.textContent = `ファイルを送信しています（${done}/${total}）…`;
       const { blob, key } = await FormCrypto.encryptFile(file);
-      const session = await api('file-session', { token, fieldId: c.field.id, size: blob.size, batch });
+      const session = await api('file-session', { ...who, fieldId: c.field.id, size: blob.size, batch });
       const uploaded = await putFile(session.uploadUrl, blob);
-      await api('file-complete', { token, fileId: uploaded.id });
+      await api('file-complete', { ...who, fileId: uploaded.id });
       sent.push({ fileId: uploaded.id, name: file.name, type: file.type, size: file.size, key });
     }
     answers[c.field.id] = sent;
@@ -465,7 +472,8 @@ function buildPrintView(answers, submitted) {
   h.textContent = page.title;
   const meta = document.createElement('p');
   meta.className = 'print-meta';
-  meta.textContent = `送信日時：${new Date(submitted).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}　送信先：蒲田和紀税理士事務所`;
+  const when = new Date(submitted).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+  meta.textContent = office ? `入力日時：${when}` : `送信日時：${when}　送信先：蒲田和紀税理士事務所`;
   const grid = document.createElement('div');
   FormRender.buildView(grid, page.fields, answers, page);
   view.replaceChildren(h, meta, grid);
@@ -474,7 +482,7 @@ function buildPrintView(answers, submitted) {
 async function api(path, body) {
   let res;
   try {
-    res = await fetch(`/api/form/${path}`, {
+    res = await fetch(`${API_BASE}${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),

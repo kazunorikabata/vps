@@ -6,25 +6,43 @@
   <meta name="robots" content="noindex, nofollow">
   <meta name="referrer" content="no-referrer">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://www.googleapis.com; form-action 'none'; base-uri 'none'; object-src 'none'">
-  <title>ご入力のお願い｜蒲田和紀税理士事務所</title>
+  <title>入力｜蒲田和紀税理士事務所</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&family=Noto+Serif+JP:wght@500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="/staff/staff.css?v=20261008-11">
   <link rel="stylesheet" href="/form/layout.css?v=20261008-11">
   <link rel="stylesheet" href="/form/form.css?v=20261008-11">
 </head>
-<body>
+<!-- 事務所用の入力ページ（職員が入力する）。中身は顧問先の入力画面（/form/）と同じ部品と form.js を使う -->
+<body data-mode="office">
   <header class="site-header">
     <div class="container header-inner">
-      <a href="/" class="logo">蒲田和紀税理士事務所</a>
+      <a href="/staff/" class="logo">蒲田和紀税理士事務所</a>
+      <div class="staff-header-right">
+        <a href="/" class="staff-home-link">ホームページへ</a>
+        <span class="staff-badge">事務所内</span>
+      </div>
     </div>
   </header>
 
   <main class="section">
-    <div class="container entry">
+    <div class="container staff-layout">
+      <nav class="staff-sidebar" aria-label="事務所内のメニュー">
+        <p class="staff-sidebar-group">顧問先の管理</p>
+        <a href="/staff/" data-nav="clients">顧問先の登録・URL</a>
+        <a href="/staff/forms.html" data-nav="forms">顧問先用の入力ページ</a>
+        <p class="staff-sidebar-group">事務所の管理</p>
+        <a href="/staff/forms.html?kind=office" data-nav="office" class="is-current">事務所用の入力ページ</a>
+        <p class="staff-sidebar-group">サイトの修正</p>
+        <a href="/staff/site.html" data-nav="site">Claude Code の会話</a>
+      </nav>
+
+    <div class="entry">
+
       <p id="preview-note" class="preview-note" hidden>プレビュー（事務所の確認用です。送信されません）</p>
-      <h1 id="title" class="section-title">ご入力のお願い</h1>
+      <h1 id="title" class="section-title">入力</h1>
 
       <p id="loading" class="entry-message">読み込んでいます…</p>
       <p id="invalid" class="entry-message is-error" hidden></p>
@@ -48,8 +66,8 @@
       </form>
 
       <div id="done" class="entry-message" hidden>
-        <p><strong>送信が完了しました。ありがとうございました。</strong></p>
-        <p>入力した内容は、このページを閉じると表示できなくなります。控えが必要な場合は、PDFで保存してください。</p>
+        <p><strong>送信しました。ドライブの「事務所の記録」フォルダに保存されました。</strong></p>
+        <p>入力した内容は、事務所用の入力ページの「届いた内容」で見られます。この場ですぐ控えが必要な場合は、PDFで保存してください。</p>
         <p id="done-mynumber" class="entry-warning" hidden>PDFにはマイナンバーが含まれます。保存したファイルは大切に保管し、メールなどで送らないでください。</p>
         <button type="button" id="print" class="send-button">入力内容をPDFで保存</button>
         <p class="entry-note">「印刷」の画面が開きます。送信先（プリンター）で「PDFに保存」を選んでください。</p>
@@ -57,15 +75,16 @@
 
       <section id="print-view" class="print-view" aria-hidden="true"></section>
     </div>
+    </div>
   </main>
 
   <footer class="site-footer">
     <div class="container">
-      <p>蒲田和紀税理士事務所</p>
-      <p>〒273-0021 千葉県船橋市海神3-2-15</p>
+      <p class="footer-staff"><a href="/staff/forms.html?kind=office">事務所用の入力ページの一覧に戻る</a></p>
       <p><small>&copy; 蒲田和紀税理士事務所</small></p>
     </div>
   </footer>
+
 
   <script src="/form/crypto.js?v=20261008-11"></script>
   <script src="/form/render.js?v=20261008-11"></script>

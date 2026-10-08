@@ -37,6 +37,7 @@ ROOT_FILE = os.path.join(DATA_DIR, "root-folder.json")
 FORMS_FILE = os.path.join(DATA_DIR, "forms.json")              # 入力ページの定義（項目の並び。入力内容は置かない）
 REQUESTS_FILE = os.path.join(DATA_DIR, "form-requests.json")   # 入力ページのURLの鍵 → 顧問先と入力ページ
 KEY_FILE = os.path.join(DATA_DIR, "public-key.json")           # 事務所の公開鍵（暗号化用。復号はできない）
+OFFICE_FILE = os.path.join(DATA_DIR, "office-folder.json")      # 「事務所の記録」フォルダ（事務所用の入力ページの保存先）
 ROOT_NAME = "顧問先資料"
 ALLOWED_ORIGIN = os.environ.get("UPLOAD_ALLOWED_ORIGIN", "https://kabaoffice.com")
 UPLOAD_BASE_URL = ALLOWED_ORIGIN + "/upload/#"
@@ -47,7 +48,7 @@ STAFF_PORT = int(os.environ.get("UPLOAD_STAFF_PORT", "8082"))
 MAX_SIZE = 50 * 1024 * 1024
 MAX_BODY = 4096
 # 既定より大きい本文を受け付ける API（nginx の client_max_body_size もあわせる）
-BODY_LIMITS = {"/form/submit": 256 * 1024, "/forms/save": 64 * 1024, "/key/set": 8192}
+BODY_LIMITS = {"/form/submit": 256 * 1024, "/office/submit": 256 * 1024, "/forms/save": 64 * 1024, "/key/set": 8192}
 MAX_RECORD = 512 * 1024   # 事務所内ページで開く入力内容のファイルの大きさの上限
 RATE_LIMIT = 60      # 1つのURLから1時間に受け付ける件数
 RATE_WINDOW = 3600
@@ -80,6 +81,10 @@ FILE_MAGIC = b"KABAENC1"
 MAX_ENCRYPTED_SIZE = MAX_SIZE + 64
 MAX_FILES = 10
 BATCH_RE = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
+# 入力ページの種類：顧問先用（URL を発行して顧問先が入力）と事務所用（職員が事務所内ページで入力）
+FORM_KINDS = {"client", "office"}
+OFFICE_NAME = "事務所の記録"
+OFFICE_CODE = "事務所"
 FIELD_ID_RE = re.compile(r"^[a-z0-9_]{1,40}$")
 B64_RE = re.compile(r"^[A-Za-z0-9+/]+={0,2}$")
 
@@ -358,6 +363,16 @@ def root_folder():
     return root["folder_id"]
 
 
+def office_folder():
+    """「事務所の記録」フォルダのIDを返す。なければ作る"""
+    with _clients_lock:
+        office = load_json(OFFICE_FILE)
+        if not office:
+            office = {"folder_id": create_folder(OFFICE_NAME)}
+            save_json(OFFICE_FILE, office)
+    return office["folder_id"]
+
+
 def check_code(code):
     if not isinstance(code, str) or not CODE_RE.match(code):
         raise UploadError(400, "番号は半角英数字（20文字以内）で入力してください。")
@@ -588,6 +603,7 @@ def check_form(form):
         "title": text(form.get("title"), 100, "入力ページの名前", required=True),
         "description": text(form.get("description", ""), 2000, "説明"),
         "encrypt": encrypt,
+        "kind": form.get("kind") if form.get("kind") in FORM_KINDS else "client",
         # 顧問先が保存する PDF で、項目を枠で囲むか
         "pdfBorder": form.get("pdfBorder") is not False,
         "labelPosition": form.get("labelPosition") if form.get("labelPosition") in LABEL_POSITIONS else "top",
@@ -649,9 +665,17 @@ def find_request(token):
         raise UploadError(403, "このURLは無効です。事務所にお問い合わせください。")
     req = load_json(REQUESTS_FILE).get(token)
     form = load_json(FORMS_FILE).get(req["form_id"]) if req else None
-    if not form:
+    if not form or form.get("kind") == "office":
         raise UploadError(403, "このURLは無効です。事務所にお問い合わせください。")
     return req, form
+
+
+def find_office_form(form_id):
+    """事務所用の入力ページ（事務所内ページで職員が入力する）"""
+    form = find_form(load_json(FORMS_FILE), form_id)
+    if form.get("kind") != "office":
+        raise UploadError(404, "入力ページが見つかりません。")
+    return form
 
 
 def public_key():
@@ -697,6 +721,11 @@ def handle_complete(body):
 
 def handle_form_get(body):
     _, form = find_request(body.get("token"))
+    return form_page(form)
+
+
+def form_page(form):
+    """入力画面に渡す内容（項目と表示の設定。暗号化するなら事務所の公開鍵も）"""
     data = {k: form[k] for k in ("title", "description", "encrypt", "fields")}
     # 設定を作る前の入力ページは、枠あり・項目名は上・説明は入力欄の上
     data["pdfBorder"] = form.get("pdfBorder", True)
@@ -717,6 +746,11 @@ def handle_form_submit(body):
     folder_id = find_folder(req["code"])
     if not folder_id:
         raise UploadError(403, "このURLは無効です。事務所にお問い合わせください。")
+    return save_submission(req["form_id"], form, folder_id, req["code"], body, token)
+
+
+def save_submission(form_id, form, folder_id, code, body, rate_key, staff=None):
+    """入力内容をドライブに保存する（顧問先用・事務所用で共通）。staff は事務所用で入力した職員"""
     if form["encrypt"]:
         enc = body.get("encrypted")
         key = public_key()
@@ -735,25 +769,28 @@ def handle_form_submit(body):
     batch = body.get("batch")
     if batch is not None and (not isinstance(batch, str) or not BATCH_RE.match(batch)):
         raise UploadError(400, "送信内容の形式が正しくありません。")
-    check_rate(token)
+    check_rate(rate_key)
     now = datetime.now(JST)
     record = {
         "version": 1,
-        "formId": req["form_id"],
+        "formId": form_id,
         "formTitle": form["title"],
-        "code": req["code"],
+        "code": code,
         "submitted": now.isoformat(timespec="seconds"),
         # あとで入力ページを直しても読めるように、送信時点の項目を残す
         "fields": form["fields"],
         **content,
     }
     title = form_title_for_name(form)
-    props = {"kabaForm": req["form_id"], "kabaCode": req["code"]}
+    props = {"kabaForm": form_id, "kabaCode": code}
     if batch:
         props["kabaBatch"] = batch   # 一緒に送られたファイル（入力内容を削除するときに一緒に消す）
+    if staff:
+        record["staff"] = staff
+        props["kabaStaff"] = staff
     create_json_file(folder_id, f"{now:%Y%m%d-%H%M%S}_{title}.json", record, props)
     # 入力内容は記録に残さない
-    log.info("form submitted code=%s form=%s encrypted=%s", req["code"], req["form_id"], form["encrypt"])
+    log.info("form submitted code=%s form=%s encrypted=%s staff=%s", code, form_id, form["encrypt"], staff or "-")
     return {"ok": True, "submitted": record["submitted"]}
 
 
@@ -765,6 +802,13 @@ def handle_form_file_session(body):
     """入力ページのファイル（ブラウザで暗号化したもの）の受付口を発行する。元のファイル名は受け取らない"""
     token = body.get("token")
     req, form = find_request(token)
+    folder_id = find_folder(req["code"])
+    if not folder_id:
+        raise UploadError(403, "このURLは無効です。事務所にお問い合わせください。")
+    return file_session(req["form_id"], form, folder_id, req["code"], body, token)
+
+
+def file_session(form_id, form, folder_id, code, body, rate_key):
     field_id = body.get("fieldId")
     if not any(f["id"] == field_id and f["type"] == "file" for f in iter_fields(form["fields"])):
         raise UploadError(400, "送信内容の形式が正しくありません。")
@@ -776,34 +820,64 @@ def handle_form_file_session(body):
     batch = body.get("batch")
     if not isinstance(batch, str) or not BATCH_RE.match(batch):
         raise UploadError(400, "送信内容の形式が正しくありません。")
-    folder_id = find_folder(req["code"])
-    if not folder_id:
-        raise UploadError(403, "このURLは無効です。事務所にお問い合わせください。")
-    check_rate(token)
+    check_rate(rate_key)
     name = f"{datetime.now(JST):%Y%m%d-%H%M%S}_{form_title_for_name(form)}_添付_{secrets.token_hex(3)}.enc"
     url = create_upload_session(folder_id, name, "application/octet-stream", size,
-                                {"kabaFileOf": req["form_id"], "kabaCode": req["code"], "kabaBatch": batch})
-    log.info("form file session code=%s form=%s size=%d", req["code"], req["form_id"], size)
+                                {"kabaFileOf": form_id, "kabaCode": code, "kabaBatch": batch})
+    log.info("form file session code=%s form=%s size=%d", code, form_id, size)
     return {"uploadUrl": url}
 
 
 def handle_form_file_complete(body):
     """送られたファイルが、この顧問先のフォルダにある暗号化したファイルか確かめる。違えばゴミ箱へ"""
     req, form = find_request(body.get("token"))
+    return file_complete(req["form_id"], find_folder(req["code"]), req["code"], body)
+
+
+def file_complete(form_id, folder_id, code, body):
     file_id = body.get("fileId")
     if not isinstance(file_id, str) or not FILE_ID_RE.match(file_id):
         raise UploadError(400, "ファイルが見つかりません。")
     f = get_file(file_id)
-    folder_id = find_folder(req["code"])
-    if (f is None or folder_id not in f.get("parents", [])
-            or f.get("appProperties", {}).get("kabaFileOf") != req["form_id"]):
+    if (f is None or not folder_id or folder_id not in f.get("parents", [])
+            or f.get("appProperties", {}).get("kabaFileOf") != form_id):
         raise UploadError(404, "ファイルが見つかりません。")
     size = int(f.get("size", 0))
     if not len(FILE_MAGIC) < size <= MAX_ENCRYPTED_SIZE or read_head(file_id, len(FILE_MAGIC)) != FILE_MAGIC:
         trash_file(file_id)
-        log.warning("form file rejected code=%s form=%s size=%d", req["code"], req["form_id"], size)
+        log.warning("form file rejected code=%s form=%s size=%d", code, form_id, size)
         raise UploadError(400, "ファイルを受け付けられませんでした。もう一度お試しください。")
     return {"ok": True}
+
+
+# --- 事務所用の入力ページ（事務所内ページで職員が入力する。保存先は「事務所の記録」フォルダ） ---
+# 入力した職員は nginx のベーシック認証のユーザー名（StaffHandler が _staff に入れる）
+
+def staff_name(body):
+    name = body.get("_staff") or "-"
+    return re.sub(r"[^\w.@-]", "_", name)[:50]
+
+
+def handle_office_get(body):
+    return form_page(find_office_form(body.get("formId")))
+
+
+def handle_office_submit(body):
+    form_id = body.get("formId")
+    form = find_office_form(form_id)
+    return save_submission(form_id, form, office_folder(), OFFICE_CODE, body, f"office:{form_id}", staff_name(body))
+
+
+def handle_office_file_session(body):
+    form_id = body.get("formId")
+    form = find_office_form(form_id)
+    return file_session(form_id, form, office_folder(), OFFICE_CODE, body, f"office:{form_id}")
+
+
+def handle_office_file_complete(body):
+    form_id = body.get("formId")
+    find_office_form(form_id)
+    return file_complete(form_id, office_folder(), OFFICE_CODE, body)
 
 
 def client_view(token, client):
@@ -915,7 +989,8 @@ def handle_requests_add(body):
     """顧問先に入力ページのURLを発行する（同じ顧問先にはすでにあるURLを返す）"""
     code = check_code(body.get("code"))
     with _forms_lock:
-        find_form(load_json(FORMS_FILE), body.get("formId"))
+        if find_form(load_json(FORMS_FILE), body.get("formId")).get("kind") == "office":
+            raise UploadError(400, "事務所用の入力ページには、URLを発行できません。")
         if not find_folder(code):
             raise UploadError(404, f"{code} は登録されていません。")
         reqs = load_json(REQUESTS_FILE)
@@ -952,7 +1027,8 @@ def handle_requests_qr(body):
 def handle_submissions_list(body):
     form_id = check_form_id(body.get("formId"))
     return {"submissions": [
-        {"id": f["id"], "code": f.get("appProperties", {}).get("kabaCode", ""), "submitted": f.get("createdTime", "")}
+        {"id": f["id"], "code": f.get("appProperties", {}).get("kabaCode", ""),
+         "staff": f.get("appProperties", {}).get("kabaStaff", ""), "submitted": f.get("createdTime", "")}
         for f in list_form_files(form_id)
     ]}
 
@@ -1033,10 +1109,14 @@ STAFF_ROUTES = {
     "/submissions/get": handle_submissions_get,
     "/submissions/remove": handle_submissions_remove,
     "/submissions/file": handle_submissions_file,
+    "/office/get": handle_office_get,
+    "/office/submit": handle_office_submit,
+    "/office/file-session": handle_office_file_session,
+    "/office/file-complete": handle_office_file_complete,
 }
 # 見るだけの API（変更の記録を残さない）
 STAFF_READ_ONLY = {"/clients/list", "/clients/qr", "/forms/list", "/requests/list", "/requests/qr",
-                   "/submissions/list"}
+                   "/submissions/list", "/office/get"}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1107,6 +1187,12 @@ class Handler(BaseHTTPRequestHandler):
 
 class StaffHandler(Handler):
     routes = STAFF_ROUTES
+
+    def read_json(self):
+        body = super().read_json()
+        # 事務所用の入力ページで、入力した職員を残すため（送られてきた値は使わない）
+        body["_staff"] = self.headers.get("X-Staff-User", "")
+        return body
 
     def after_route(self, body):
         # 誰が変更したか（入力内容を開いたか）を残す。ユーザー名は nginx のベーシック認証から

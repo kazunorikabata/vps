@@ -105,8 +105,9 @@ function openEditor(form) {
   editing = form
     ? { id: form.id, form: structuredClone({ title: form.title, description: form.description, encrypt: form.encrypt,
       pdfBorder: form.pdfBorder !== false, labelPosition: form.labelPosition || 'top', helpPosition: form.helpPosition || 'above',
-      fields: form.fields }) }
-    : { id: null, form: { title: '', description: '', encrypt: true, pdfBorder: true, labelPosition: 'top', helpPosition: 'above', fields: [] } };
+      kind: formKind, fields: form.fields }) }
+    : { id: null, form: { title: '', description: '', encrypt: true, pdfBorder: true, labelPosition: 'top', helpPosition: 'above',
+      kind: formKind, fields: [] } };
   for (const field of FormRender.iterFields(editing.form.fields)) prepareField(field);
   selectedId = null;
   document.getElementById('editor-title').textContent = form ? `「${form.title}」を編集` : '新しい入力ページ';

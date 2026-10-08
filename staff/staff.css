@@ -3,6 +3,37 @@
 .staff { max-width: 860px; }
 .staff.is-busy { cursor: progress; }
 
+/* サイドバー（事務所内のすべてのページで左側に出すメニュー） */
+/* ヘッダーの幅も中身にそろえる（staff.css は事務所内のページだけで読み込む） */
+.site-header > .container { max-width: 1480px; }
+.staff-layout { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 32px; align-items: start; max-width: 1480px; }
+.staff-sidebar {
+  position: sticky;
+  top: calc(var(--header-h) + 16px);
+  padding: 12px 0;
+  background: #fff;
+  border: 1px solid var(--line);
+}
+.staff-sidebar-group { margin: 12px 0 4px; padding: 0 16px; color: var(--navy); font-family: var(--serif); font-weight: 700; }
+.staff-sidebar-group:first-child { margin-top: 0; }
+.staff-sidebar a { display: block; padding: 8px 16px 8px 28px; border-left: 4px solid transparent; color: #333; font-size: 0.95rem; text-decoration: none; }
+.staff-sidebar a:hover { background: #f6f2ea; }
+.staff-sidebar a.is-current { border-left-color: var(--navy); background: #f6f2ea; color: var(--navy); font-weight: 700; }
+
+/* 幅の狭い画面では、ページの上に横並びのメニューにする */
+@media (max-width: 900px) {
+  .staff-layout { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .staff-sidebar { position: static; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; }
+  .staff-sidebar-group { display: none; }
+  .staff-sidebar a { padding: 6px 12px; border: 1px solid var(--line); font-size: 0.9rem; }
+  .staff-sidebar a.is-current { border-color: var(--navy); }
+}
+
+@media print {
+  .staff-sidebar { display: none; }
+  .staff-layout { display: block; }
+}
+
 .staff-header-right { display: flex; align-items: center; gap: 16px; }
 .staff-home-link { color: var(--navy); font-size: 0.9rem; }
 
