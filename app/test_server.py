@@ -523,6 +523,16 @@ class FormTest(unittest.TestCase):
         status, data = self.post("/form/get", {"token": data["request"]["token"]})
         self.assertEqual((data["labelPosition"], data["helpPosition"]), ("side", "inside"))
 
+    def test_check_text(self):
+        fields = self.form()["fields"]
+        fields[2]["checkText"] = "  上記の内容に同意します "
+        status, data = self.staff("/forms/save", {"form": self.form(fields=fields)})
+        self.assertEqual(status, 200, data)
+        self.assertEqual(data["form"]["fields"][2]["checkText"], "上記の内容に同意します")
+        self.assertNotIn("checkText", data["form"]["fields"][1])   # チェック以外には付けない
+        fields[2]["checkText"] = "あ" * 101
+        self.assertEqual(self.staff("/forms/save", {"form": self.form(fields=fields)})[0], 400)
+
     def test_layout_answers(self):
         form = self.layout_form()
         form["fields"][0]["children"].pop()   # マイナンバーを外して暗号化なしで試す

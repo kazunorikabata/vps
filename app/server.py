@@ -456,6 +456,9 @@ def check_field(f, ids, in_group=False):
         if not isinstance(children, list):
             raise UploadError(400, "枠の中の項目の形式が正しくありません。")
         field["children"] = [check_field(c, ids, in_group=True) for c in children]
+    if ftype == "checkbox":
+        # チェックの横の文言（空なら画面では「はい」）
+        field["checkText"] = text(f.get("checkText", ""), 100, "チェックの横の文言")
     if ftype == "select":
         options = f.get("options")
         if not isinstance(options, list) or not 1 <= len(options) <= 100:

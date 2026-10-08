@@ -229,7 +229,7 @@ const FormRender = (() => {
       const input = el('input');
       input.type = 'checkbox';
       input.id = id;
-      wrap.append(input, ' はい');
+      wrap.append(input, ' ', checkText(field));
       wrap.checkbox = input;
       return wrap;
     }
@@ -381,8 +381,13 @@ const FormRender = (() => {
     return wrap;
   }
 
+  // チェックの横の文言（事務所で決める。空なら「はい」）
+  function checkText(field) {
+    return field.checkText || 'はい';
+  }
+
   function displayValue(field, value) {
-    if (field.type === 'checkbox') return value ? 'はい' : '';
+    if (field.type === 'checkbox') return value ? checkText(field) : '';
     return value == null ? '' : String(value);
   }
 

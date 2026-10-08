@@ -8,7 +8,7 @@ const TYPES = {
   number: '数字・金額',
   date: '日付',
   select: '選択肢',
-  checkbox: 'チェック（はい）',
+  checkbox: 'チェック',
   tel: '電話番号',
   email: 'メールアドレス',
   zip: '郵便番号',
@@ -442,6 +442,11 @@ function renderProps() {
   if (FormRender.isInput(field)) {
     items.push(checkLine('必須にする', field.required, (checked) => { field.required = checked; renderCanvas(); }));
   }
+  if (field.type === 'checkbox') {
+    const text = input(field.checkText || '', '例：上記の内容に同意します（空なら「はい」）', 100);
+    text.addEventListener('input', () => { field.checkText = text.value; renderCanvas(); });
+    items.push(propRow('チェックの横の文言', text));
+  }
   if (field.type === 'select') items.push(propRow('選択肢（1行に1つ）', optionsEditor(field)));
   if (field.type === 'table') items.push(...tableEditor(field));
 
@@ -493,6 +498,7 @@ function changeType(field, type) {
   if (type !== 'select') delete field.options;
   if (type !== 'table') { delete field.columns; delete field.maxRows; delete field.rowLabels; }
   if (type !== 'note') delete field.style;
+  if (type !== 'checkbox') delete field.checkText;
   if (type !== 'group') delete field.children;
   if (!FormRender.isInput(field)) field.required = false;
   if (!FormRender.isInput(field) || type === 'table') delete field.labelPosition;
