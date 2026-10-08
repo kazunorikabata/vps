@@ -95,7 +95,7 @@ HELP_POSITIONS = {"above", "inside"}
 # 説明を入力欄の中に出せる種類
 PLACEHOLDER_TYPES = {"text", "textarea", "number", "tel", "email", "zip", "mynumber"}
 MAX_FIELDS = 300
-COLUMN_TYPES = {"text", "number", "date", "checkbox", "mynumber"}
+COLUMN_TYPES = {"text", "number", "date", "select", "checkbox", "mynumber"}
 
 log = logging.getLogger("upload")
 
@@ -529,6 +529,12 @@ def check_table(f, field):
             # 数字の列だけ、表の下に合計を出せる
             "sum": c.get("sum") is True and c["type"] == "number",
         })
+        if c["type"] == "select":
+            # 選択肢の列：マスごとにプルダウンで選ぶ
+            options = c.get("options")
+            if not isinstance(options, list) or not 1 <= len(options) <= 100:
+                raise UploadError(400, f"「{field['label']}」の列「{field['columns'][-1]['label']}」の選択肢を1〜100個で入力してください。")
+            field["columns"][-1]["options"] = [text(o, 100, "選択肢", required=True) for o in options]
     # 行の名前（例：1月〜12月）があれば、行数が決まった表にする
     row_labels = f.get("rowLabels")
     if row_labels:
@@ -620,10 +626,12 @@ def check_answers(form, answers):
             ok = (isinstance(value, list) and all(isinstance(v, str) and v in f["options"] for v in value)
                   and (len(value) <= 1 or not f.get("single")))
         elif f["type"] == "table":
-            cols = {c["id"] for c in f["columns"]}
+            cols = {c["id"]: c for c in f["columns"]}
             ok = isinstance(value, list) and len(value) <= f["maxRows"] and all(
-                isinstance(row, dict) and set(row) <= cols
+                isinstance(row, dict) and set(row) <= set(cols)
                 and all(isinstance(v, str) and len(v) <= 500 for v in row.values())
+                # 選択肢の列は、選択肢のどれかか空
+                and all(v in ("", *cols[k]["options"]) for k, v in row.items() if cols[k]["type"] == "select")
                 for row in value)
         else:
             ok = isinstance(value, str) and len(value) <= 5000

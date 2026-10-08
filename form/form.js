@@ -262,7 +262,7 @@ function fillDraft(values) {
         while (c.body.rows.length < Math.min(value.length, c.field.maxRows)) c.add.click();
       }
       [...c.body.rows].forEach((tr, i) => {
-        for (const input of tr.querySelectorAll('input[data-col]')) {
+        for (const input of tr.querySelectorAll('[data-col]')) {
           const col = c.field.columns.find((x) => x.id === input.dataset.col);
           if (col.type !== 'mynumber') FormRender.setCellValue(input, (value[i] || {})[col.id] || '');
         }
@@ -366,7 +366,7 @@ function inputValue(c) {
 }
 
 function tableValue(c) {
-  for (const input of c.body.querySelectorAll('input[data-col]')) {
+  for (const input of c.body.querySelectorAll('[data-col]')) {
     const col = c.field.columns.find((x) => x.id === input.dataset.col);
     if (col.type !== 'checkbox') input.value = normalize(col.type, input.value);
   }

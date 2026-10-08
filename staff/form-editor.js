@@ -26,7 +26,7 @@ const TYPES = {
 const LAYOUT_PALETTE = ['heading', 'divider', 'note', 'spacer', 'group', 'page'];
 // 枠の中に置けない部品（いちばん外の並びにだけ置ける）
 const TOP_ONLY = ['group', 'page'];
-const COLUMN_TYPES = { text: '文字', number: '数字・金額', date: '日付', checkbox: 'チェック', mynumber: 'マイナンバー' };
+const COLUMN_TYPES = { text: '文字', number: '数字・金額', date: '日付', select: '選択肢', checkbox: 'チェック', mynumber: 'マイナンバー' };
 const NOTE_STYLES = { normal: '普通', bold: '太字', warning: '注意（赤）' };
 const WIDTHS = {
   12: '全幅（12マス）', 9: '4分の3（9マス）', 8: '3分の2（8マス）', 6: '半分（6マス）',
@@ -624,6 +624,8 @@ function tableEditor(field) {
     type.addEventListener('change', () => {
       col.type = type.value;
       if (col.type !== 'number') col.sum = false;
+      if (col.type === 'select') col.options = col.options || [];
+      else delete col.options;
       renderAll();
     });
     const width = select(Object.fromEntries(Array.from({ length: 10 }, (_, n) => [n + 1, `幅${n + 1}`])), String(col.width), '列の幅');
@@ -649,6 +651,17 @@ function tableEditor(field) {
     ops.className = 'ed-column-ops';
     ops.append(up, down, remove);
     row.append(name, type, width, sum, ops);
+    // 選択肢の列は、選択肢を1行に1つ書く
+    if (col.type === 'select') {
+      const options = textArea((col.options || []).join('\n'), 3, `${col.label || '列'}の選択肢`, 5000);
+      options.placeholder = '選択肢（1行に1つ）\n例：\n配偶者\n子';
+      options.className = 'ed-column-options';
+      options.addEventListener('input', () => {
+        col.options = options.value.split('\n').map((s) => s.trim()).filter(Boolean);
+        renderCanvas();
+      });
+      row.append(options);
+    }
     box.append(row);
   });
   const add = button('列を追加', () => {

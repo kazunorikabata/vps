@@ -656,6 +656,18 @@ class FormTest(unittest.TestCase):
             # 顧問先用の入口からは使えない
             self.assertEqual(self.post("/submissions/file", {"id": "file123456"})[0], 404)
 
+    def test_table_select_column(self):
+        fields = self.form()["fields"]
+        fields[4]["columns"].append({"id": "rel", "type": "select", "label": "続柄", "options": ["配偶者", " 子 "]})
+        _, token = self.make_request(encrypt=False, fields=fields)
+        status, data = self.staff("/forms/list", {})
+        self.assertEqual(data["forms"][0]["fields"][4]["columns"][2]["options"], ["配偶者", "子"])
+        for rel, status in (("子", 200), ("", 200), ("父", 400)):
+            answers = {"name": "ダミー", "family": [{"name": "ダミー花子", "rel": rel}]}
+            self.assertEqual(self.post("/form/submit", {"token": token, "answers": answers})[0], status, rel)
+        fields[4]["columns"][2]["options"] = []
+        self.assertEqual(self.staff("/forms/save", {"form": self.form(fields=fields)})[0], 400)
+
     def test_layout_answers(self):
         form = self.layout_form()
         form["fields"][0]["children"].pop()   # マイナンバーを外して暗号化なしで試す

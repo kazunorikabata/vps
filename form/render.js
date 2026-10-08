@@ -325,11 +325,18 @@ const FormRender = (() => {
     const tr = body.insertRow();
     if (rowLabel != null) tr.append(el('th', 'f-rowlabel', rowLabel));
     for (const col of field.columns) {
-      const input = el('input');
-      if (col.type === 'checkbox') {
+      let input;
+      if (col.type === 'select') {
+        // 選択肢の列：マスごとにプルダウン
+        input = el('select', 'f-input');
+        input.append(new Option('選択', ''));
+        for (const option of col.options || []) input.append(new Option(option, option));
+      } else if (col.type === 'checkbox') {
+        input = el('input');
         input.type = 'checkbox';
         input.className = 'f-cell-check';
       } else {
+        input = el('input');
         Object.assign(input, INPUTS[col.type] || INPUTS.text);
         input.className = 'f-input';
       }
@@ -372,7 +379,7 @@ const FormRender = (() => {
     for (const tr of control.body.rows) {
       const row = {};
       let filled = false;
-      for (const input of tr.querySelectorAll('input[data-col]')) {
+      for (const input of tr.querySelectorAll('[data-col]')) {
         row[input.dataset.col] = cellValue(input);
         if (row[input.dataset.col]) filled = true;
       }

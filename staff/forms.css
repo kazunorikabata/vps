@@ -125,6 +125,7 @@
 .ed-column > input { grid-column: 1 / -1; }
 .ed-column .check-line { font-size: 0.85rem; }
 .ed-column-ops { display: flex; gap: 4px; justify-content: flex-end; }
+.ed-column > .ed-column-options { grid-column: 1 / -1; }
 .ed-actions { display: flex; gap: 10px; margin-top: 24px; }
 
 @media (max-width: 900px) {
