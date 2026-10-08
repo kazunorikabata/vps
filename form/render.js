@@ -113,7 +113,7 @@ const FormRender = (() => {
   // layout は入力ページの設定 { labelPosition: 'top'|'side', helpPosition: 'above'|'inside' }。
   // 項目に同じ名前の設定があれば、そちらを使う。表の項目名はいつも上
   function labelSide(field, layout = {}) {
-    return field.type !== 'table' && (field.labelPosition || layout.labelPosition) === 'side';
+    return field.type !== 'table' && !field.hideLabel && (field.labelPosition || layout.labelPosition) === 'side';
   }
 
   function canHelpInside(type) {
@@ -124,12 +124,15 @@ const FormRender = (() => {
     return Boolean(field.help) && canHelpInside(field.type) && (field.helpPosition || layout.helpPosition) === 'inside';
   }
 
-  // 項目名を横にするときは、入力欄・説明・エラーを右側の body にまとめる
+  // 項目名を横にするときは、入力欄・説明・エラーを右側の body にまとめる。
+  // hideLabel の項目は項目名を見せない（読み上げには使う）。必須の印は残す
   function fieldBox(field, layout) {
     const box = el('div', 'f-field');
-    const label = el(field.type === 'table' ? 'p' : 'label', 'f-label', field.label);
+    const label = el(field.type === 'table' ? 'p' : 'label', 'f-label');
+    label.append(el('span', field.hideLabel ? 'visually-hidden' : '', field.label));
     if (field.type !== 'table' && field.type !== 'checkbox') label.htmlFor = `field-${field.id}`;
     if (field.required) label.append(' ', el('span', 'required-mark', '必須'));
+    else if (field.hideLabel) label.classList.add('visually-hidden');
     box.append(label);
     let body = box;
     if (labelSide(field, layout)) {
@@ -351,7 +354,7 @@ const FormRender = (() => {
         } else {
           e = el('div', 'f-field is-view');
           if (labelSide(field, layout)) e.classList.add('is-side');
-          e.append(el('p', 'f-label', field.label));
+          e.append(el('p', `f-label${field.hideLabel ? ' visually-hidden' : ''}`, field.label));
           const value = answers[field.id];
           if (field.type === 'table') e.append(viewTable(field, value || []));
           else e.append(el('p', 'f-value', displayValue(field, value) || '—'));

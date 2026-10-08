@@ -436,6 +436,9 @@ def check_field(f, ids, in_group=False):
         "width": check_int(f.get("width"), 1, 12, 12, "項目の幅は1〜12マスで指定してください。"),
         "newRow": f.get("newRow") is True,
     }
+    # 項目名を画面に出さない（CSV の列名とエラーの表示には使うので、項目名は必要）
+    if ftype not in LAYOUT_TYPES and f.get("hideLabel") is True:
+        field["hideLabel"] = True
     # 項目ごとの位置の設定（なければ入力ページの設定どおり）
     if ftype not in LAYOUT_TYPES and ftype != "table" and f.get("labelPosition") in LABEL_POSITIONS:
         field["labelPosition"] = f["labelPosition"]

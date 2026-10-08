@@ -441,6 +441,11 @@ function renderProps() {
 
   if (FormRender.isInput(field)) {
     items.push(checkLine('必須にする', field.required, (checked) => { field.required = checked; renderCanvas(); }));
+    items.push(checkLine('項目名を表示しない（CSVの列名とエラーの表示には使います）', Boolean(field.hideLabel), (checked) => {
+      if (checked) field.hideLabel = true;
+      else delete field.hideLabel;
+      renderAll();
+    }));
   }
   if (field.type === 'checkbox') {
     const text = input(field.checkText || '', '例：上記の内容に同意します（空なら「はい」）', 100);
@@ -499,6 +504,7 @@ function changeType(field, type) {
   if (type !== 'table') { delete field.columns; delete field.maxRows; delete field.rowLabels; }
   if (type !== 'note') delete field.style;
   if (type !== 'checkbox') delete field.checkText;
+  if (!FormRender.isInput(field)) delete field.hideLabel;
   if (type !== 'group') delete field.children;
   if (!FormRender.isInput(field)) field.required = false;
   if (!FormRender.isInput(field) || type === 'table') delete field.labelPosition;
@@ -522,7 +528,7 @@ function positionEditor(field) {
     });
     items.push(propRow(label, control));
   };
-  if (field.type !== 'table') choice('labelPosition', LABEL_POSITIONS, '項目名の位置');
+  if (field.type !== 'table' && !field.hideLabel) choice('labelPosition', LABEL_POSITIONS, '項目名の位置');
   if (FormRender.canHelpInside(field.type)) choice('helpPosition', HELP_POSITIONS, '説明の位置');
   return items;
 }

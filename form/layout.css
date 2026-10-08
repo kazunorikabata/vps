@@ -22,6 +22,8 @@
 .f-field.is-view.is-side > .f-label { padding-top: 0; }
 .f-body { min-width: 0; }
 .f-label { display: block; margin: 0 0 6px; font-weight: 700; }
+/* 画面には出さず、読み上げにだけ使う（項目名を表示しない項目） */
+.visually-hidden { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .f-help { margin: 0 0 8px; color: #666; font-size: 0.9rem; white-space: pre-wrap; }
 .f-error { margin: 8px 0 0; color: #b3261e; font-size: 0.9rem; font-weight: 700; }
 .f-value { margin: 0; white-space: pre-wrap; word-break: break-all; }

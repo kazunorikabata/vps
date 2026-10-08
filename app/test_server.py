@@ -533,6 +533,17 @@ class FormTest(unittest.TestCase):
         fields[2]["checkText"] = "あ" * 101
         self.assertEqual(self.staff("/forms/save", {"form": self.form(fields=fields)})[0], 400)
 
+    def test_hide_label(self):
+        fields = self.form()["fields"]
+        fields[0]["hideLabel"] = True    # 見出しには付けない
+        fields[1]["hideLabel"] = True
+        fields[3]["hideLabel"] = "yes"
+        status, data = self.staff("/forms/save", {"form": self.form(fields=fields)})
+        self.assertEqual(status, 200, data)
+        self.assertEqual([f.get("hideLabel") for f in data["form"]["fields"]], [None, True, None, None, None])
+        fields[1]["label"] = ""          # 表示しなくても項目名は必要
+        self.assertEqual(self.staff("/forms/save", {"form": self.form(fields=fields)})[0], 400)
+
     def test_layout_answers(self):
         form = self.layout_form()
         form["fields"][0]["children"].pop()   # マイナンバーを外して暗号化なしで試す
