@@ -31,3 +31,4 @@
 - 受付サーバーの設置・更新：`sudo bash app/deploy/setup.sh`。sudo にパスワードが要るため、ユーザーに実行してもらう
 - 顧問先の登録・削除：`sudo /opt/kabaoffice-upload/venv/bin/python /opt/kabaoffice-upload/clients_admin.py add|remove|reissue|list`
 - `deploy.sh` は `app/` を公開フォルダに送らない。公開ファイル以外を追加したら除外の設定を確認する
+- Cloudflare が JS・CSS を4時間ほど保存する。`form/`・`staff/` の JS・CSS を変えたら、読み込む HTML の `?v=日付` を新しくする（古いファイルと混ざって動かなくなるのを防ぐ）
