@@ -51,6 +51,7 @@ async function start() {
     return { title: p.title, box, controls: FormRender.buildForm(grid, p.fields) };
   });
   controls = steps.flatMap((s) => s.controls);
+  if (!preview) startDraft();
   showStep(0);
   document.getElementById('loading').hidden = true;
   form.hidden = false;
@@ -125,6 +126,7 @@ form.addEventListener('submit', async (event) => {
       submitted = (await api('submit', body)).submitted;
     }
     dirty = false;
+    if (!preview) clearDraft();
     showDone(answers, submitted);
   } catch (err) {
     showFormError(err.message);
@@ -135,6 +137,138 @@ form.addEventListener('submit', async (event) => {
 });
 
 document.getElementById('print').addEventListener('click', () => window.print());
+
+// --- 途中保存（この端末のブラウザに下書きを残す） ---
+// 入力するたびに自動で保存し、同じURLを同じ端末で開き直すと続きから入力できる。
+// サーバーには送らない。マイナンバーは保存しない。送信したら消し、30日たったものも消す
+const DRAFT_PREFIX = 'kabaoffice-form-draft:';
+const DRAFT_DAYS = 30;
+let draftTimer = null;
+
+function startDraft() {
+  removeOldDrafts();
+  const draft = readDraft();
+  if (draft) fillDraft(draft.values);
+  showDraftNote(draft);
+  for (const type of ['input', 'change', 'click']) {
+    form.addEventListener(type, () => {
+      clearTimeout(draftTimer);
+      draftTimer = setTimeout(saveDraft, 500);
+    });
+  }
+}
+
+function readDraft() {
+  try {
+    const draft = JSON.parse(localStorage.getItem(DRAFT_PREFIX + token));
+    return draft && draft.values ? draft : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveDraft() {
+  const values = {};
+  for (const c of controls) {
+    if (c.field.type === 'mynumber') continue;
+    if (c.field.type === 'checkbox') {
+      values[c.field.id] = c.input.checkbox.checked;
+    } else if (c.field.type === 'table') {
+      const skip = c.field.columns.filter((col) => col.type === 'mynumber').map((col) => col.id);
+      values[c.field.id] = FormRender.tableRows(c, true).map((row) => {
+        for (const id of skip) delete row[id];
+        return row;
+      });
+    } else {
+      values[c.field.id] = c.input.value;
+    }
+  }
+  try {
+    localStorage.setItem(DRAFT_PREFIX + token, JSON.stringify({ saved: new Date().toISOString(), values }));
+  } catch {
+    // 保存できないブラウザ（プライベートブラウズなど）では、途中保存なしで使う
+  }
+}
+
+// 入力ページが直されていても、残っている項目だけ戻す
+function fillDraft(values) {
+  for (const c of controls) {
+    const value = values[c.field.id];
+    if (value == null || c.field.type === 'mynumber') continue;
+    if (c.field.type === 'checkbox') {
+      c.input.checkbox.checked = value === true;
+    } else if (c.field.type === 'table') {
+      if (!Array.isArray(value)) continue;
+      if (!c.fixed) {
+        while (c.body.rows.length < Math.min(value.length, c.field.maxRows)) c.add.click();
+      }
+      [...c.body.rows].forEach((tr, i) => {
+        for (const input of tr.querySelectorAll('input[data-col]')) {
+          const col = c.field.columns.find((x) => x.id === input.dataset.col);
+          if (col.type !== 'mynumber') input.value = (value[i] || {})[col.id] || '';
+        }
+      });
+      if (c.updateSum) c.updateSum(FormRender.tableRows(c, true));
+    } else {
+      c.input.value = String(value);
+    }
+  }
+}
+
+function clearDraft() {
+  clearTimeout(draftTimer);
+  try {
+    localStorage.removeItem(DRAFT_PREFIX + token);
+  } catch {
+    // 何もしない
+  }
+}
+
+function removeOldDrafts() {
+  const limit = Date.now() - DRAFT_DAYS * 24 * 3600 * 1000;
+  try {
+    for (const key of Object.keys(localStorage)) {
+      if (!key.startsWith(DRAFT_PREFIX)) continue;
+      let saved = NaN;
+      try {
+        saved = new Date(JSON.parse(localStorage.getItem(key)).saved).getTime();
+      } catch {
+        // 壊れた下書きは消す
+      }
+      if (!(saved > limit)) localStorage.removeItem(key);
+    }
+  } catch {
+    // 何もしない
+  }
+}
+
+function showDraftNote(draft) {
+  const note = document.getElementById('draft-note');
+  const text = document.getElementById('draft-text');
+  const mynumber = hasMyNumber() ? 'マイナンバーは保存しません。' : '';
+  if (draft) {
+    const when = new Date(draft.saved).toLocaleString('ja-JP', {
+      timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
+    });
+    text.textContent = `前回（${when}）の途中まで入力した内容を戻しました。${mynumber ? 'マイナンバーはもう一度入力してください。' : ''}`;
+    note.classList.add('is-restored');
+  } else {
+    text.textContent = `入力内容はこの端末に自動で一時保存され、同じ端末でこのページを開き直すと続きから入力できます（送信すると消えます）。${mynumber}家族などと共用の端末では、入力をやめるときに下のボタンで消してください。`;
+  }
+  note.hidden = false;
+}
+
+document.getElementById('draft-clear').addEventListener('click', (event) => {
+  event.stopPropagation();   // 消した直後に保存し直さない
+  clearDraft();
+  dirty = false;
+  location.reload();
+});
+
+function hasMyNumber() {
+  return [...FormRender.iterFields(page.fields)].some((f) => f.type === 'mynumber'
+    || (f.columns || []).some((c) => c.type === 'mynumber'));
+}
 
 // --- 入力内容の取りまとめと確認 ---
 
@@ -238,9 +372,7 @@ function showFormError(text) {
 function showDone(answers, submitted) {
   buildPrintView(answers, submitted);
   form.hidden = true;
-  const hasMyNumber = [...FormRender.iterFields(page.fields)].some((f) => f.type === 'mynumber'
-    || (f.columns || []).some((c) => c.type === 'mynumber'));
-  document.getElementById('done-mynumber').hidden = !hasMyNumber;
+  document.getElementById('done-mynumber').hidden = !hasMyNumber();
   document.getElementById('done').hidden = false;
   window.scrollTo({ top: 0 });
 }

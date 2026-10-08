@@ -32,6 +32,12 @@
 /* 事務所の作成画面から開いたプレビュー */
 .preview-note { margin: 0 0 24px; padding: 10px 14px; background: #fbeeed; border-left: 4px solid #b3261e; color: #8c1d18; font-weight: 700; }
 
+/* 途中保存（この端末への下書き）のお知らせ */
+.draft-note { margin: 0 0 16px; padding: 10px 14px; background: #fff; border: 1px solid var(--line); font-size: 0.9rem; }
+.draft-note p { margin: 0; }
+.draft-note.is-restored { border-color: #2e6b3a; }
+.draft-note.is-restored p { color: #2e6b3a; font-weight: 700; }
+
 /* ページ区切りがあるとき：何ページ目かの表示と「戻る」「次へ」 */
 .page-step { margin: 0 0 12px; padding: 8px 14px; background: var(--navy); color: #fff; font-weight: 700; }
 .page-buttons { display: flex; gap: 12px; margin-top: 24px; }
