@@ -629,7 +629,21 @@ function tableEditor(field) {
     const remove = button('×', () => { field.columns.splice(i, 1); renderAll(); }, 'button-outline');
     remove.setAttribute('aria-label', '列を削除');
     remove.disabled = field.columns.length === 1;
-    row.append(name, type, width, sum, remove);
+    // 列の順番を入れ替える（↑で左へ、↓で右へ）
+    const moveColumn = (to) => {
+      field.columns.splice(to, 0, field.columns.splice(i, 1)[0]);
+      renderAll();
+    };
+    const up = button('↑', () => moveColumn(i - 1), 'button-outline');
+    up.setAttribute('aria-label', '列を前（左）へ');
+    up.disabled = i === 0;
+    const down = button('↓', () => moveColumn(i + 1), 'button-outline');
+    down.setAttribute('aria-label', '列を後ろ（右）へ');
+    down.disabled = i === field.columns.length - 1;
+    const ops = document.createElement('div');
+    ops.className = 'ed-column-ops';
+    ops.append(up, down, remove);
+    row.append(name, type, width, sum, ops);
     box.append(row);
   });
   const add = button('列を追加', () => {
