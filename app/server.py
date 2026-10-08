@@ -492,6 +492,8 @@ def check_field(f, ids, in_group=False):
     if ftype == "checkboxes":
         # 選択肢をいくつでも選べるチェック。縦に並べるか横に並べるか
         field["direction"] = "horizontal" if f.get("direction") == "horizontal" else "vertical"
+        # 1つだけ選べる（丸いボタン）
+        field["single"] = f.get("single") is True
     if ftype == "file":
         field["maxFiles"] = check_int(f.get("maxFiles"), 1, MAX_FILES, 1,
                                       f"「{field['label']}」のファイルの数は1〜{MAX_FILES}個で指定してください。")
@@ -615,7 +617,8 @@ def check_answers(form, answers):
         if f["type"] == "checkbox":
             ok = isinstance(value, bool)
         elif f["type"] == "checkboxes":
-            ok = isinstance(value, list) and all(isinstance(v, str) and v in f["options"] for v in value)
+            ok = (isinstance(value, list) and all(isinstance(v, str) and v in f["options"] for v in value)
+                  and (len(value) <= 1 or not f.get("single")))
         elif f["type"] == "table":
             cols = {c["id"] for c in f["columns"]}
             ok = isinstance(value, list) and len(value) <= f["maxRows"] and all(

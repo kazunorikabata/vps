@@ -461,6 +461,11 @@ function renderProps() {
   }
   if (field.type === 'select' || field.type === 'checkboxes') items.push(propRow('選択肢（1行に1つ）', optionsEditor(field)));
   if (field.type === 'checkboxes') {
+    items.push(checkLine('1つだけ選べるようにする（丸いボタンになります）', Boolean(field.single), (checked) => {
+      if (checked) field.single = true;
+      else delete field.single;
+      renderCanvas();
+    }));
     const direction = select(DIRECTIONS, field.direction, '選択肢の並べ方');
     direction.addEventListener('change', () => { field.direction = direction.value; renderCanvas(); });
     items.push(propRow('選択肢の並べ方', direction));
@@ -529,7 +534,7 @@ function textArea(value, rows, label, maxLength) {
 function changeType(field, type) {
   field.type = type;
   if (type !== 'select' && type !== 'checkboxes') delete field.options;
-  if (type !== 'checkboxes') delete field.direction;
+  if (type !== 'checkboxes') { delete field.direction; delete field.single; }
   if (type !== 'file') delete field.maxFiles;
   if (type !== 'table') { delete field.columns; delete field.maxRows; delete field.rowLabels; }
   if (type !== 'note') delete field.style;

@@ -396,7 +396,7 @@ function check(field, value) {
     }
     return '';
   }
-  if (field.type === 'checkboxes') return field.required && !value.length ? '1つ以上選んでください' : '';
+  if (field.type === 'checkboxes') return field.required && !value.length ? `${field.single ? '1つ' : '1つ以上'}選んでください` : '';
   if (field.type === 'file') return checkFiles(field, value);
   if (field.required && (value === '' || value === false)) {
     return field.type === 'checkbox' ? '確認のうえ、チェックを入れてください' : '入力してください';

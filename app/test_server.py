@@ -568,6 +568,11 @@ class FormTest(unittest.TestCase):
         self.assertEqual(self.post("/form/submit", {"token": token, "answers": ok})[0], 200)
         for bad in ({"deduct": ["その他"]}, {"deduct": "医療費"}):
             self.assertEqual(self.post("/form/submit", {"token": token, "answers": bad})[0], 400, bad)
+        # 1つだけ選べる設定では、2つ以上は受け付けない
+        fields[5]["single"] = True
+        _, token = self.make_request(encrypt=False, fields=fields)
+        self.assertEqual(self.post("/form/submit", {"token": token, "answers": {"deduct": ["医療費"]}})[0], 200)
+        self.assertEqual(self.post("/form/submit", {"token": token, "answers": ok})[0], 400)
         no_options = self.form(fields=[{"id": "c", "type": "checkboxes", "label": "x", "options": []}])
         self.assertEqual(self.staff("/forms/save", {"form": no_options})[0], 400)
 

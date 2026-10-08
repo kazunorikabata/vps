@@ -241,7 +241,8 @@ const FormRender = (() => {
       wrap.checkbox = input;
       return wrap;
     }
-    // 複数チェック：選択肢ごとにチェックを並べる（checks に一覧）
+    // 複数チェック：選択肢ごとにチェックを並べる（checks に一覧）。
+    // single なら丸いボタン（1つだけ選べる）。選んだものをもう一度押すと外せる
     if (field.type === 'checkboxes') {
       const wrap = el('div', `f-checks${field.direction === 'horizontal' ? ' is-horizontal' : ''}`);
       wrap.id = id;
@@ -250,8 +251,16 @@ const FormRender = (() => {
       wrap.checks = field.options.map((option) => {
         const label = el('label', 'f-check');
         const input = el('input');
-        input.type = 'checkbox';
+        input.type = field.single ? 'radio' : 'checkbox';
         input.value = option;
+        if (field.single) {
+          input.name = id;
+          label.addEventListener('pointerdown', () => { input.wasChecked = input.checked; });
+          input.addEventListener('click', () => {
+            if (input.wasChecked) input.checked = false;
+            input.wasChecked = false;
+          });
+        }
         label.append(input, ' ', option);
         wrap.append(label);
         return input;
