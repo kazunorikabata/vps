@@ -1,8 +1,9 @@
 // 入力ページの部品の表示（顧問先の入力画面・PDF・事務所内ページの作成画面と確認画面で共通）
 // 横12マスのマス目に、部品ごとの幅（width）で並べる。newRow の部品は行の頭から置く。
 // スマホなど幅の狭い画面では、すべて縦1列になる（layout.css）
+// ページ区切り（page）があれば、顧問先の画面は1ページずつ進み、PDF もそこで改ページする
 const FormRender = (() => {
-  const LAYOUT_TYPES = new Set(['heading', 'divider', 'note', 'spacer', 'group']);
+  const LAYOUT_TYPES = new Set(['heading', 'divider', 'note', 'spacer', 'group', 'page']);
   const INPUTS = {
     text: { type: 'text' },
     number: { type: 'text', inputMode: 'decimal' },
@@ -23,6 +24,22 @@ const FormRender = (() => {
       yield f;
       if (f.children) yield* f.children;
     }
+  }
+
+  // ページ区切りで分けた [{ title, fields }]。区切りの名前は次のページの見出し。中身のないページは作らない
+  function splitPages(fields) {
+    const pages = [];
+    let current = { title: '', fields: [] };
+    for (const f of fields) {
+      if (f.type !== 'page') {
+        current.fields.push(f);
+        continue;
+      }
+      if (current.fields.length) pages.push(current);
+      current = { title: f.label || '', fields: [] };
+    }
+    if (current.fields.length || !pages.length) pages.push(current);
+    return pages;
   }
 
   function el(tag, className, text) {
@@ -79,6 +96,8 @@ const FormRender = (() => {
     }
     if (field.type === 'note') return el('p', `f-note is-${field.style || 'normal'}`, field.label);
     if (field.type === 'spacer') return el('div', 'f-spacer');
+    // ページ区切り（作成画面で、どこでページが変わるかを見せる）
+    if (field.type === 'page') return el('div', 'f-pagebreak', `ここから次のページ${field.label ? `：${field.label}` : ''}`);
     // 枠（グループ）：中にもマス目を作る
     const box = el('fieldset', 'f-group');
     if (field.label) box.append(el('legend', '', field.label));
@@ -283,7 +302,24 @@ const FormRender = (() => {
 
   // --- 読むだけの表示（PDF と、事務所内ページで届いた内容を見るとき） ---
 
+  // ページ区切りがあれば、ページごとに見出しを付けて分ける（PDF ではページごとに改ページ）
   function buildView(container, fields, answers) {
+    const pages = splitPages(fields);
+    if (pages.length === 1) {
+      viewGrid(container, pages[0].fields, answers);
+      return;
+    }
+    container.replaceChildren(...pages.map((page, i) => {
+      const section = el('section', 'f-page');
+      section.append(el('h2', 'f-page-title', `${i + 1} / ${pages.length}${page.title ? `　${page.title}` : ''}`));
+      const grid = el('div');
+      viewGrid(grid, page.fields, answers);
+      section.append(grid);
+      return section;
+    }));
+  }
+
+  function viewGrid(container, fields, answers) {
     const build = (grid, list) => {
       for (const field of list) {
         let e;
@@ -326,5 +362,5 @@ const FormRender = (() => {
     return value == null ? '' : String(value);
   }
 
-  return { isInput, iterFields, buildForm, buildView, tableRows, sums, parseNumber, formatNumber, displayValue };
+  return { isInput, iterFields, splitPages, buildForm, buildView, tableRows, sums, parseNumber, formatNumber, displayValue };
 })();

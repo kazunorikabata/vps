@@ -32,9 +32,14 @@
         <p id="description" class="entry-description"></p>
         <p id="secure-note" class="entry-note" hidden>入力内容はこの画面の中で暗号化してから送信します。事務所以外の人は読めません。</p>
         <p class="entry-note"><span class="required-mark">必須</span> の項目は必ず入力してください。</p>
+        <p id="page-step" class="page-step" hidden></p>
         <div id="fields"></div>
         <p id="form-error" class="entry-error" role="alert" hidden></p>
-        <button type="submit" id="send" class="send-button">送信する</button>
+        <div class="page-buttons">
+          <button type="button" id="prev" class="send-button is-outline" hidden>← 戻る</button>
+          <button type="submit" id="next" class="send-button" hidden>次へ →</button>
+          <button type="submit" id="send" class="send-button">送信する</button>
+        </div>
       </form>
 
       <div id="done" class="entry-message" hidden>

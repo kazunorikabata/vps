@@ -482,6 +482,27 @@ class FormTest(unittest.TestCase):
         for form in bad:
             self.assertEqual(self.staff("/forms/save", {"form": form})[0], 400, form["fields"])
 
+    def test_pages_and_pdf_border(self):
+        fields = self.form()["fields"]
+        fields.insert(2, {"id": "p1", "type": "page", "label": "2ページ目", "width": 4})
+        status, data = self.staff("/forms/save", {"form": self.form(fields=fields, encrypt=False)})
+        self.assertEqual(status, 200, data)
+        page = data["form"]["fields"][2]
+        self.assertEqual((page["label"], page["width"], page["newRow"]), ("2ページ目", 12, True))
+        self.assertTrue(data["form"]["pdfBorder"])   # 指定がなければ枠あり
+        status, data = self.staff("/forms/save", {"id": data["form"]["id"],
+                                                  "form": self.form(fields=fields, encrypt=False, pdfBorder=False)})
+        self.assertFalse(data["form"]["pdfBorder"])
+        status, data = self.staff("/requests/add", {"formId": data["form"]["id"], "code": "C001"})
+        status, data = self.post("/form/get", {"token": data["request"]["token"]})
+        self.assertEqual(status, 200)
+        self.assertFalse(data["pdfBorder"])
+        # ページ区切りは入力欄ではない。枠の中には置けない
+        self.assertEqual(self.staff("/forms/save", {"form": self.form(fields=[{"id": "p", "type": "page"}])})[0], 400)
+        nested = self.layout_form()
+        nested["fields"][0]["children"].append({"id": "p2", "type": "page"})
+        self.assertEqual(self.staff("/forms/save", {"form": nested})[0], 400)
+
     def test_layout_answers(self):
         form = self.layout_form()
         form["fields"][0]["children"].pop()   # マイナンバーを外して暗号化なしで試す

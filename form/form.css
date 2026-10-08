@@ -27,6 +27,12 @@
   cursor: pointer;
 }
 .send-button:disabled { background: #9aa5b4; cursor: progress; }
+.send-button.is-outline { background: #fff; box-shadow: inset 0 0 0 2px var(--navy); color: var(--navy); }
+
+/* ページ区切りがあるとき：何ページ目かの表示と「戻る」「次へ」 */
+.page-step { margin: 0 0 12px; padding: 8px 14px; background: var(--navy); color: #fff; font-weight: 700; }
+.page-buttons { display: flex; gap: 12px; margin-top: 24px; }
+.page-buttons .send-button { flex: 1; margin-top: 0; }
 
 /* PDF（印刷）用。画面には出さない */
 .print-view { display: none; }
@@ -44,4 +50,9 @@
   .print-view .f-label { margin: 0; font-size: 8.5pt; color: #555; }
   .print-view .f-group { padding: 4px 8px 8px; break-inside: avoid; }
   .print-view .f-table th, .print-view .f-table td { padding: 3px 6px; border: 1px solid #999; font-size: 9pt; }
+  /* ページ区切りごとに改ページ */
+  .print-view .f-page + .f-page { margin-top: 0; break-before: page; }
+  .print-view .f-page-title { font-size: 11pt; }
+  /* 「PDFの枠：なし」の入力ページ（表の罫線と「枠」の部品は残す） */
+  .print-view.no-border .f-field { padding: 2px 0; border: 0; }
 }

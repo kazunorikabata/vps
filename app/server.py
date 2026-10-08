@@ -79,9 +79,9 @@ B64_RE = re.compile(r"^[A-Za-z0-9+/]+={0,2}$")
 
 # 入力ページの項目の種類（表の列に使えるのは COLUMN_TYPES だけ）
 FIELD_TYPES = {"heading", "text", "textarea", "number", "date", "select", "checkbox",
-               "tel", "email", "zip", "mynumber", "table", "divider", "note", "spacer", "group"}
-# 入力欄のない部品（見出し・区切り線・説明文・空白・枠）
-LAYOUT_TYPES = {"heading", "divider", "note", "spacer", "group"}
+               "tel", "email", "zip", "mynumber", "table", "divider", "note", "spacer", "group", "page"}
+# 入力欄のない部品（見出し・区切り線・説明文・空白・枠・ページ区切り）
+LAYOUT_TYPES = {"heading", "divider", "note", "spacer", "group", "page"}
 NOTE_STYLES = {"normal", "bold", "warning"}
 MAX_FIELDS = 300
 COLUMN_TYPES = {"text", "number", "date", "mynumber"}
@@ -418,8 +418,8 @@ def check_field(f, ids, in_group=False):
     ftype = f.get("type")
     if ftype not in FIELD_TYPES:
         raise UploadError(400, "項目の種類が正しくありません。")
-    # 区切り線・空白・枠は名前がなくてもよい。説明文は本文を label に入れる
-    label_required = ftype not in ("divider", "spacer", "group")
+    # 区切り線・空白・枠・ページ区切りは名前がなくてもよい。説明文は本文を label に入れる
+    label_required = ftype not in ("divider", "spacer", "group", "page")
     field = {
         "id": fid,
         "type": ftype,
@@ -433,6 +433,12 @@ def check_field(f, ids, in_group=False):
     }
     if ftype == "note":
         field["style"] = f.get("style") if f.get("style") in NOTE_STYLES else "normal"
+    if ftype == "page":
+        # ページ区切り：ここから次のページ。label は次のページの見出し
+        if in_group:
+            raise UploadError(400, "枠の中にページ区切りは置けません。")
+        field["width"] = 12
+        field["newRow"] = True
     if ftype == "group":
         if in_group:
             raise UploadError(400, "枠の中に枠は置けません。")
@@ -515,6 +521,8 @@ def check_form(form):
         "title": text(form.get("title"), 100, "入力ページの名前", required=True),
         "description": text(form.get("description", ""), 2000, "説明"),
         "encrypt": encrypt,
+        # 顧問先が保存する PDF で、項目を枠で囲むか
+        "pdfBorder": form.get("pdfBorder") is not False,
         "fields": fields,
     }
 
@@ -616,6 +624,7 @@ def handle_complete(body):
 def handle_form_get(body):
     _, form = find_request(body.get("token"))
     data = {k: form[k] for k in ("title", "description", "encrypt", "fields")}
+    data["pdfBorder"] = form.get("pdfBorder", True)   # 設定を作る前の入力ページは枠あり
     if form["encrypt"]:
         key = public_key()
         if not key:

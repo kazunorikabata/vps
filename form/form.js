@@ -2,6 +2,7 @@
 // 項目は事務所内ページで作ったものを読み込んで表示する。暗号化する入力ページでは、
 // 入力内容をこの画面の中で事務所の公開鍵で暗号化してから送る（VPS には読めない形でしか届かない）
 // 項目の並べ方（マス目）と部品の表示は render.js（事務所内ページと共通）
+// ページ区切りがあれば、1ページずつ「次へ」で進む（次へ進むときに、そのページの入力を確かめる）
 const NETWORK_ERROR = '通信できませんでした。電波の良い場所で再度お試しください';
 
 const token = location.hash.slice(1);
@@ -9,9 +10,13 @@ const form = document.getElementById('entry-form');
 const fieldsBox = document.getElementById('fields');
 const formError = document.getElementById('form-error');
 const sendButton = document.getElementById('send');
+const prevButton = document.getElementById('prev');
+const nextButton = document.getElementById('next');
 
 let page = null;
 let controls = [];
+let steps = [];      // ページごとの { title, box, controls }
+let stepIndex = 0;   // 表示しているページ
 let dirty = false;
 
 start();
@@ -31,10 +36,38 @@ async function start() {
   document.getElementById('title').textContent = page.title;
   document.getElementById('description').textContent = page.description;
   document.getElementById('secure-note').hidden = !page.encrypt;
-  controls = FormRender.buildForm(fieldsBox, page.fields);
+  steps = FormRender.splitPages(page.fields).map((p) => {
+    const box = document.createElement('section');
+    const grid = document.createElement('div');
+    box.append(grid);
+    fieldsBox.append(box);
+    return { title: p.title, box, controls: FormRender.buildForm(grid, p.fields) };
+  });
+  controls = steps.flatMap((s) => s.controls);
+  showStep(0);
   document.getElementById('loading').hidden = true;
   form.hidden = false;
 }
+
+function showStep(index) {
+  stepIndex = index;
+  steps.forEach((s, i) => { s.box.hidden = i !== index; });
+  const last = index === steps.length - 1;
+  const label = document.getElementById('page-step');
+  label.textContent = `${index + 1} / ${steps.length} ページ${steps[index].title ? `　${steps[index].title}` : ''}`;
+  label.hidden = steps.length === 1;
+  prevButton.hidden = index === 0;
+  nextButton.hidden = last;
+  sendButton.hidden = !last;
+  formError.hidden = true;
+}
+
+function moveStep(index) {
+  showStep(index);
+  window.scrollTo({ top: 0 });
+}
+
+prevButton.addEventListener('click', () => moveStep(stepIndex - 1));
 
 function showInvalid(text) {
   document.getElementById('loading').hidden = true;
@@ -53,6 +86,11 @@ window.addEventListener('beforeunload', (event) => {
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
   formError.hidden = true;
+  // 最後のページでなければ、このページを確かめて次へ（入力欄で Enter を押したときも）
+  if (stepIndex < steps.length - 1) {
+    if (collect(steps[stepIndex].controls)) moveStep(stepIndex + 1);
+    return;
+  }
   const answers = collect();
   if (!answers) return;
   sendButton.disabled = true;
@@ -76,21 +114,24 @@ document.getElementById('print').addEventListener('click', () => window.print())
 
 // --- 入力内容の取りまとめと確認 ---
 
-function collect() {
+// list：確かめる入力欄（「次へ」ではそのページの分だけ）。直すところが別のページにあれば、そのページを開く
+function collect(list = controls) {
   const answers = {};
   let first = null;
-  for (const c of controls) {
+  for (const c of list) {
     const value = c.field.type === 'table' ? tableValue(c) : inputValue(c);
     const message = check(c.field, value);
     c.error.textContent = message;
     c.error.hidden = !message;
     c.box.classList.toggle('has-error', Boolean(message));
-    if (message && !first) first = c.box;
+    if (message && !first) first = c;
     answers[c.field.id] = value;
   }
   if (first) {
+    const at = steps.findIndex((s) => s.controls.includes(first));
+    if (at !== stepIndex) showStep(at);
     showFormError('入力内容を確認してください。');
-    first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    first.box.scrollIntoView({ behavior: 'smooth', block: 'center' });
     return null;
   }
   return answers;
@@ -183,6 +224,7 @@ function showDone(answers, submitted) {
 // PDF（印刷）用：入力画面と同じ並びで、入力した内容を表示する
 function buildPrintView(answers, submitted) {
   const view = document.getElementById('print-view');
+  view.classList.toggle('no-border', page.pdfBorder === false);
   const h = document.createElement('h1');
   h.textContent = page.title;
   const meta = document.createElement('p');

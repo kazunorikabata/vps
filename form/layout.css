@@ -59,6 +59,18 @@
   background: #fcfbf8;
   border: 2px solid var(--navy);
 }
+.f-pagebreak {
+  padding: 6px 12px;
+  border-top: 3px double var(--navy);
+  border-bottom: 3px double var(--navy);
+  color: var(--navy);
+  font-weight: 700;
+  font-size: 0.9rem;
+  text-align: center;
+}
+/* 読むだけの表示で、ページごとに分けたとき */
+.f-page + .f-page { margin-top: 24px; }
+.f-page-title { margin: 0 0 10px; padding-bottom: 4px; border-bottom: 2px solid var(--navy); color: var(--navy); font-size: 1.05rem; }
 .f-group > legend { padding: 0 8px; color: var(--navy); font-family: var(--serif); font-weight: 700; font-size: 1.1rem; }
 
 /* 表 */

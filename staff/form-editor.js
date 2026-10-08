@@ -19,8 +19,11 @@ const TYPES = {
   note: '説明文',
   spacer: '空白',
   group: '枠',
+  page: 'ページ区切り',
 };
-const LAYOUT_PALETTE = ['heading', 'divider', 'note', 'spacer', 'group'];
+const LAYOUT_PALETTE = ['heading', 'divider', 'note', 'spacer', 'group', 'page'];
+// 枠の中に置けない部品（いちばん外の並びにだけ置ける）
+const TOP_ONLY = ['group', 'page'];
 const COLUMN_TYPES = { text: '文字', number: '数字・金額', date: '日付', mynumber: 'マイナンバー' };
 const NOTE_STYLES = { normal: '普通', bold: '太字', warning: '注意（赤）' };
 const WIDTHS = {
@@ -57,6 +60,7 @@ document.getElementById('new-form').addEventListener('click', () => openEditor(n
 document.getElementById('ed-cancel').addEventListener('click', () => { editor.hidden = true; });
 document.getElementById('ed-title').addEventListener('input', (e) => { editing.form.title = e.target.value; });
 document.getElementById('ed-description').addEventListener('input', (e) => { editing.form.description = e.target.value; });
+document.getElementById('ed-pdf-border').addEventListener('change', (e) => { editing.form.pdfBorder = e.target.checked; });
 edEncrypt.addEventListener('change', () => {
   editing.form.encrypt = edEncrypt.checked;
   showEncryptNote();
@@ -80,13 +84,15 @@ dropTarget(canvas, () => editing.form.fields, () => editing.form.fields.length, 
 
 function openEditor(form) {
   editing = form
-    ? { id: form.id, form: structuredClone({ title: form.title, description: form.description, encrypt: form.encrypt, fields: form.fields }) }
-    : { id: null, form: { title: '', description: '', encrypt: true, fields: [] } };
+    ? { id: form.id, form: structuredClone({ title: form.title, description: form.description, encrypt: form.encrypt,
+      pdfBorder: form.pdfBorder !== false, fields: form.fields }) }
+    : { id: null, form: { title: '', description: '', encrypt: true, pdfBorder: true, fields: [] } };
   for (const field of FormRender.iterFields(editing.form.fields)) prepareField(field);
   selectedId = null;
   document.getElementById('editor-title').textContent = form ? `「${form.title}」を編集` : '新しい入力ページ';
   document.getElementById('ed-title').value = editing.form.title;
   document.getElementById('ed-description').value = editing.form.description;
+  document.getElementById('ed-pdf-border').checked = editing.form.pdfBorder;
   renderAll();
   editor.hidden = false;
   editor.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -99,6 +105,7 @@ function prepareField(field) {
   if (field.type === 'select' && !field.options) field.options = [];
   if (field.type === 'note' && !field.style) field.style = 'normal';
   if (field.type === 'group' && !field.children) field.children = [];
+  if (field.type === 'page') { field.width = 12; field.newRow = true; }
   if (field.type === 'table') {
     if (!field.columns) field.columns = [{ id: 'c1', type: 'text', label: '', width: 1 }];
     if (!field.maxRows) field.maxRows = 10;
@@ -153,8 +160,8 @@ function addField(type) {
   const field = { id: newId('q', allIds()), type, label: '', help: '', required: false, width: DEFAULT_WIDTH[type] || 12 };
   prepareField(field);
   const at = selectedId && locate(selectedId);
-  if (at && at.field.type === 'group' && type !== 'group') at.field.children.push(field);
-  else if (at && !(at.parent && type === 'group')) at.list.splice(at.index + 1, 0, field);
+  if (at && at.field.type === 'group' && !TOP_ONLY.includes(type)) at.field.children.push(field);
+  else if (at && !(at.parent && TOP_ONLY.includes(type))) at.list.splice(at.index + 1, 0, field);
   else editing.form.fields.push(field);
   selectField(field.id);
   const first = props.querySelector('input:not([type=checkbox]), textarea');
@@ -230,7 +237,7 @@ function decorate(e, field, list, index) {
 
   const badge = document.createElement('span');
   badge.className = 'ed-badge';
-  badge.textContent = `${TYPES[field.type]}・${field.width}${field.newRow ? '・行の頭' : ''}`;
+  badge.textContent = field.type === 'page' ? TYPES.page : `${TYPES[field.type]}・${field.width}${field.newRow ? '・行の頭' : ''}`;
   e.prepend(badge);
 
   e.addEventListener('click', (event) => {
@@ -274,7 +281,8 @@ function decorate(e, field, list, index) {
     moveField(id, list, list.indexOf(field) + (isAfter(e, event) ? 1 : 0));
   });
 
-  // 右端のつまみで幅を変える（マス目に合わせる）
+  // 右端のつまみで幅を変える（マス目に合わせる）。ページ区切りはいつも全幅
+  if (field.type === 'page') return;
   const handle = document.createElement('span');
   handle.className = 'ed-resize';
   handle.title = '左右に動かして幅を変える';
@@ -288,12 +296,12 @@ function isAfter(e, event) {
   return event.clientX > rect.left + rect.width / 2;
 }
 
-// 枠を枠の中には入れられない。枠の中身ごと、自分の中にも入れられない
+// 枠とページ区切りは枠の中には入れられない。枠の中身ごと、自分の中にも入れられない
 function canDrop(list) {
   if (!draggingId) return false;
   const dragged = locate(draggingId);
   if (!dragged) return false;
-  if (dragged.field.type === 'group' && list !== editing.form.fields) return false;
+  if (TOP_ONLY.includes(dragged.field.type) && list !== editing.form.fields) return false;
   return true;
 }
 
@@ -367,9 +375,9 @@ function renderProps() {
   title.textContent = `${TYPES[field.type]}の設定`;
   items.push(title);
 
-  // 種類（枠の中では枠にできない。中身のある枠は種類を変えられない）
+  // 種類（枠の中では枠・ページ区切りにできない。中身のある枠は種類を変えられない）
   const types = { ...TYPES };
-  if (at.parent) delete types.group;
+  if (at.parent) for (const t of TOP_ONLY) delete types[t];
   const type = select(types, field.type, '種類');
   type.disabled = field.type === 'group' && field.children.length > 0;
   type.addEventListener('change', () => changeType(field, type.value));
@@ -383,26 +391,33 @@ function renderProps() {
     style.addEventListener('change', () => { field.style = style.value; renderCanvas(); });
     items.push(propRow('文字の強さ', style));
   } else if (field.type !== 'spacer') {
-    const names = { heading: '見出しの文字', divider: '線の中の文字（任意）', group: '枠の名前（任意）' };
+    const names = { heading: '見出しの文字', divider: '線の中の文字（任意）', group: '枠の名前（任意）', page: '次のページの見出し（任意）' };
     const label = input(field.label, names[field.type] || '項目名（例：氏名）', 200);
     label.addEventListener('input', () => { field.label = label.value; renderCanvas(); });
     items.push(propRow(names[field.type] || '項目名', label));
   }
-  if (!['divider', 'spacer', 'note'].includes(field.type)) {
+  if (!['divider', 'spacer', 'note', 'page'].includes(field.type)) {
     const help = input(field.help || '', '説明（任意）：入力のしかたなど', 500);
     help.addEventListener('input', () => { field.help = help.value; renderCanvas(); });
     items.push(propRow('説明', help));
   }
 
-  // 並べ方
-  const widths = Object.fromEntries(Object.entries(WIDTHS).sort((a, b) => b[0] - a[0]));
-  const width = select(widths, String(field.width), '幅');
-  width.addEventListener('change', () => { field.width = Number(width.value); renderCanvas(); });
-  items.push(propRow('幅', width));
-  items.push(checkLine('行の頭から置く（前の部品の右に並べない）', field.newRow, (checked) => {
-    field.newRow = checked;
-    renderCanvas();
-  }));
+  // 並べ方（ページ区切りはいつも全幅）
+  if (field.type === 'page') {
+    const note = document.createElement('p');
+    note.className = 'hint';
+    note.textContent = '顧問先の画面では、ここで「次へ」のボタンになります。PDFもここで改ページします。';
+    items.push(note);
+  } else {
+    const widths = Object.fromEntries(Object.entries(WIDTHS).sort((a, b) => b[0] - a[0]));
+    const width = select(widths, String(field.width), '幅');
+    width.addEventListener('change', () => { field.width = Number(width.value); renderCanvas(); });
+    items.push(propRow('幅', width));
+    items.push(checkLine('行の頭から置く（前の部品の右に並べない）', field.newRow, (checked) => {
+      field.newRow = checked;
+      renderCanvas();
+    }));
+  }
 
   if (FormRender.isInput(field)) {
     items.push(checkLine('必須にする', field.required, (checked) => { field.required = checked; renderCanvas(); }));
