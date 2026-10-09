@@ -360,7 +360,7 @@ class FormTest(unittest.TestCase):
         self.dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.dir.cleanup)
         for name in ("CLIENTS_FILE", "FORMS_FILE", "REQUESTS_FILE", "KEY_FILE", "OFFICE_FILE", "UNLOCKS_FILE",
-                     "RECORDS_FILE", "SHEETS_FILE", "REGISTERS_FILE", "MEMBERS_FILE"):
+                     "RECORDS_FILE", "SHEETS_FILE", "REGISTERS_FILE", "MEMBERS_FILE", "SETTINGS_FILE"):
             p = mock.patch.object(server, name, os.path.join(self.dir.name, name.lower()))
             p.start()
             self.addCleanup(p.stop)
@@ -1060,6 +1060,27 @@ class FormTest(unittest.TestCase):
             self.assertIn(self.staff_as("/store/save", {**good, **bad})[0], (400, 404, 409), bad)
         self.assertEqual(self.post("/store/list", {"store": "todo"})[0], 404)   # 顧問先用の入口からは使えない
         self.assertEqual(self.sheets.books, {})
+
+    def test_deadline_store_and_settings(self):
+        self.set_key()
+        self.assertEqual(self.staff_as("/store/save", {"store": "deadline", "encrypted": self.encrypted()})[0], 200)
+        book = next(iter(self.sheets.books.values()))
+        self.assertEqual(book["name"], "事務所の管理_期限")
+        self.assertEqual(len(self.staff_as("/store/list", {"store": "deadline"})[1]["items"]), 1)
+        # まとめて足す（書き込みは1回）
+        small = {**self.encrypted(), "data": "QUJD"}
+        status, data = self.staff_as("/store/save-many", {"store": "deadline", "items": [{"encrypted": small}] * 3})
+        self.assertEqual((status, len(data["ids"]), len(set(data["ids"]))), (200, 3, 3))
+        self.assertEqual(len(self.staff_as("/store/list", {"store": "deadline"})[1]["items"]), 4)
+        for bad in ([], [{"encrypted": small}] * 101, [{"encrypted": self.encrypted("0" * 64)}], ["x"]):
+            self.assertIn(self.staff_as("/store/save-many", {"store": "deadline", "items": bad})[0], (400, 409), len(bad))
+        self.assertEqual(len(self.sheets.rows()), 4)
+        self.assertEqual(self.staff_as("/settings/get", {})[1], {"settings": {}})
+        value = {"registerId": "f123456789abc", "monthField": "q2", "withholdingField": ""}
+        self.assertEqual(self.staff_as("/settings/save", {"key": "deadline", "value": value})[1]["settings"], {"deadline": value})
+        for bad in ({"key": "other", "value": value}, {"key": "deadline", "value": {"registerId": "../x"}},
+                    {"key": "deadline", "value": {"monthField": "A-1"}}, {"key": "deadline", "value": "x"}):
+            self.assertIn(self.staff_as("/settings/save", bad)[0], (400, 404), bad)
 
     def test_members(self):
         status, data = self.staff_as("/members/list", {}, user="tanaka")

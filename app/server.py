@@ -53,7 +53,7 @@ MAX_SIZE = 50 * 1024 * 1024
 MAX_BODY = 4096
 # 既定より大きい本文を受け付ける API（nginx の client_max_body_size もあわせる）
 BODY_LIMITS = {"/form/submit": 256 * 1024, "/office/submit": 256 * 1024, "/register/save": 256 * 1024,
-               "/store/save": 256 * 1024, "/members/save": 16 * 1024, "/unlocks/add": 16 * 1024, "/forms/save": 64 * 1024, "/key/set": 8192}
+               "/store/save": 256 * 1024, "/store/save-many": 256 * 1024, "/members/save": 16 * 1024, "/unlocks/add": 16 * 1024, "/forms/save": 64 * 1024, "/key/set": 8192}
 MAX_RECORD = 512 * 1024   # 事務所内ページで開く入力内容のファイルの大きさの上限
 RATE_LIMIT = 60      # 1つのURLから1時間に受け付ける件数
 RATE_WINDOW = 3600
@@ -108,7 +108,8 @@ REGISTERS_NAME = "顧客台帳"
 MEMBERS_FILE = os.path.join(DATA_DIR, "staff-members.json")   # 職員の一覧（事務所内ページのID と表示名。TODO の担当に使う）
 # 事務所の管理（TODO など）：1件ずつ暗号化して、「事務所の記録」フォルダのスプレッドシートに入れる。
 # 直すたびに行を足し、項目の番号ごとにいちばん新しい行が今の内容（前の行は履歴）。削除も「削除」の行を足す
-STORES = {"todo": "TODO"}
+STORES = {"todo": "TODO", "deadline": "期限"}
+SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")   # 事務所内ページの設定（期限の計算に使う台帳の項目など。秘密ではない）
 ITEM_ID_RE = re.compile(r"^T[0-9a-f]{12}$")
 STORE_HEADER = ["番号", "保存日時", "項目の番号", "保存した職員", "削除", "", "暗号化の鍵", "包んだ鍵", "iv",
                 *[f"データ{i}" for i in range(1, MAX_CHUNKS + 1)]]
@@ -1147,18 +1148,41 @@ def handle_store_list(body):
     return {"items": items}
 
 
-def store_append(store, item_id, staff, deleted=False, encrypted=None):
-    info = store_sheet(store)
+def store_row(now, item_id, staff, deleted=False, encrypted=None):
     keys, data = ["", "", ""], ""
     if encrypted:
         keys, data = [encrypted["keyId"], encrypted["key"], encrypted["iv"]], encrypted["data"]
     parts = chunks(data)
     if len(parts) > MAX_CHUNKS:
         raise UploadError(400, "内容が大きすぎます。")
+    return ["R" + secrets.token_hex(8), now, item_id, staff, "1" if deleted else "", "", *keys, *parts]
+
+
+def store_append(store, item_id, staff, deleted=False, encrypted=None):
+    info = store_sheet(store)
     now = datetime.now(JST).isoformat(timespec="seconds")
-    sheets_append(info["id"], MAIN_SHEET, [["R" + secrets.token_hex(8), now, item_id, staff,
-                                            "1" if deleted else "", "", *keys, *parts]])
+    sheets_append(info["id"], MAIN_SHEET, [store_row(now, item_id, staff, deleted, encrypted)])
     return now
+
+
+def handle_store_save_many(body):
+    """新しい項目をまとめて足す（期限をまとめて作るとき。スプレッドシートへの書き込みは1回）"""
+    store = check_store(body.get("store"))
+    items = body.get("items")
+    if not isinstance(items, list) or not 1 <= len(items) <= 100:
+        raise UploadError(400, "1回に100件までです。")
+    now = datetime.now(JST).isoformat(timespec="seconds")
+    staff = staff_name(body)
+    rows, ids = [], []
+    for item in items:
+        if not isinstance(item, dict):
+            raise UploadError(400, "送信内容の形式が正しくありません。")
+        item_id = "T" + secrets.token_hex(6)
+        rows.append(store_row(now, item_id, staff, encrypted=check_encrypted(item.get("encrypted"))))
+        ids.append(item_id)
+    sheets_append(store_sheet(store)["id"], MAIN_SHEET, rows)
+    log.info("store saved store=%s count=%d staff=%s", store, len(rows), staff)
+    return {"ids": ids, "saved": now}
 
 
 def handle_store_save(body):
@@ -1179,6 +1203,43 @@ def handle_store_remove(body):
     store_append(store, item_id, staff_name(body), deleted=True)
     log.info("store removed store=%s id=%s staff=%s", store, item_id, staff_name(body))
     return {"ok": True}
+
+
+# --- 設定（期限の管理：どの台帳のどの項目が決算月・源泉の納付方法か） ---
+
+def check_deadline_settings(value):
+    if not isinstance(value, dict):
+        raise UploadError(400, "設定の形式が正しくありません。")
+    result = {}
+    register_id = value.get("registerId") or ""
+    if register_id and not FORM_ID_RE.match(register_id):
+        raise UploadError(400, "台帳が正しくありません。")
+    result["registerId"] = register_id
+    for key in ("monthField", "withholdingField"):
+        field_id = value.get(key) or ""
+        if field_id and (not isinstance(field_id, str) or not FIELD_ID_RE.match(field_id)):
+            raise UploadError(400, "台帳の項目が正しくありません。")
+        result[key] = field_id
+    return result
+
+
+SETTING_CHECKS = {"deadline": check_deadline_settings}
+
+
+def handle_settings_get(body):
+    return {"settings": load_json(SETTINGS_FILE)}
+
+
+def handle_settings_save(body):
+    key = body.get("key")
+    if key not in SETTING_CHECKS:
+        raise UploadError(404, "見つかりません。")
+    value = SETTING_CHECKS[key](body.get("value"))
+    with _forms_lock:
+        settings = load_json(SETTINGS_FILE)
+        settings[key] = value
+        save_json(SETTINGS_FILE, settings)
+    return {"settings": settings}
 
 
 # --- 職員の一覧（TODO の担当に使う。ID は秘密ではないので暗号化しない） ---
@@ -1637,8 +1698,11 @@ STAFF_ROUTES = {
     "/store/list": handle_store_list,
     "/store/save": handle_store_save,
     "/store/remove": handle_store_remove,
+    "/store/save-many": handle_store_save_many,
     "/members/list": handle_members_list,
     "/members/save": handle_members_save,
+    "/settings/get": handle_settings_get,
+    "/settings/save": handle_settings_save,
     "/office/get": handle_office_get,
     "/office/submit": handle_office_submit,
     "/office/file-session": handle_office_file_session,
@@ -1650,7 +1714,7 @@ STAFF_ROUTES = {
 # 見るだけの API（変更の記録を残さない）
 STAFF_READ_ONLY = {"/clients/list", "/clients/qr", "/forms/list", "/requests/list", "/requests/qr",
                    "/submissions/list", "/office/get", "/unlocks/list", "/register/records", "/register/history",
-                   "/register/activities", "/activities/list", "/store/list", "/members/list"}
+                   "/register/activities", "/activities/list", "/store/list", "/members/list", "/settings/get"}
 
 
 class Handler(BaseHTTPRequestHandler):

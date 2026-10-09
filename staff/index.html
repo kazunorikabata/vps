@@ -11,9 +11,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&family=Noto+Serif+JP:wght@500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
-  <link rel="stylesheet" href="/staff/staff.css?v=20261009-6">
-  <link rel="stylesheet" href="/form/layout.css?v=20261009-6">
-  <link rel="stylesheet" href="/staff/forms.css?v=20261009-6">
+  <link rel="stylesheet" href="/staff/staff.css?v=20261009-7">
+  <link rel="stylesheet" href="/form/layout.css?v=20261009-7">
+  <link rel="stylesheet" href="/staff/forms.css?v=20261009-7">
 </head>
 <body>
   <!-- 事務所内ページは、この1つのページで画面を切り替える（app.js）。鍵はこのページの中だけに置くので、
@@ -286,6 +286,9 @@
             <h4 class="register-history-title">関係するTODO</h4>
             <ul id="register-todos" class="register-history"></ul>
             <p id="register-todos-empty" class="hint" hidden>関係するTODOはありません。</p>
+            <h4 class="register-history-title">期限</h4>
+            <ul id="register-deadlines" class="register-history"></ul>
+            <p id="register-deadlines-empty" class="hint" hidden>期限はありません。</p>
             <h4 class="register-history-title">履歴（保存した日時・職員）</h4>
             <ul id="register-history" class="register-history"></ul>
             <div id="register-version" class="sub-view" hidden></div>
@@ -406,7 +409,84 @@
       <div class="view" data-view="deadline" hidden>
         <h1 class="section-title">期限の管理</h1>
         <section class="staff-card">
-          <p>準備中です。申告などの期限を、近い順に一覧できるようにします。</p>
+          <p id="deadline-locked" class="key-warning">期限は暗号化しています。見る・直すには、上の欄で鍵を開いてください。</p>
+          <div id="deadline-body" hidden>
+            <div class="todo-toolbar">
+              <label>月 <select id="deadline-month"><option value="">すべて</option></select></label>
+              <label>種類 <select id="deadline-kind"><option value="">すべて</option></select></label>
+              <label>担当 <select id="deadline-who"><option value="">全員</option><option value="me">自分の分</option></select></label>
+              <label class="check-line"><input type="checkbox" id="deadline-open" checked> 済んでいないものだけ</label>
+              <button type="button" id="deadline-add" class="button button-small">＋期限を追加</button>
+              <button type="button" id="deadline-bulk-show" class="button button-small button-outline">まとめて作る</button>
+            </div>
+            <div class="table-wrap">
+              <table class="clients-table todo-table">
+                <thead><tr><th>期限日</th><th>種類</th><th>顧問先</th><th>担当</th><th>状態</th><th>操作</th></tr></thead>
+                <tbody id="deadline-list"></tbody>
+              </table>
+            </div>
+            <p id="deadline-empty" class="hint" hidden>表示する期限はありません。</p>
+
+            <form id="deadline-form" class="register-edit todo-form" hidden>
+              <h3 id="deadline-form-title"></h3>
+              <label>種類 <span class="required-mark">必須</span><input id="deadline-form-kind" maxlength="100" required list="deadline-kinds"></label>
+              <datalist id="deadline-kinds"></datalist>
+              <div class="todo-form-row">
+                <label>顧問先<select id="deadline-form-client"><option value="">なし（事務所）</option></select></label>
+                <label>期限日 <input id="deadline-form-due" type="date" required></label>
+                <label>担当<select id="deadline-form-assignee"></select></label>
+                <label>状態<select id="deadline-form-status"><option value="todo">未着手</option><option value="doing">作業中</option><option value="filed">申告済み</option><option value="done">完了</option></select></label>
+              </div>
+              <label>メモ<textarea id="deadline-form-memo" rows="2" maxlength="2000"></textarea></label>
+              <p id="deadline-form-meta" class="hint"></p>
+              <div class="ed-actions">
+                <button type="submit" class="button">保存</button>
+                <button type="button" id="deadline-form-cancel" class="button button-outline">閉じる</button>
+              </div>
+            </form>
+
+            <div id="deadline-bulk" class="register-edit todo-form" hidden>
+              <h3>期限をまとめて作る</h3>
+              <div class="todo-form-row">
+                <label>種類
+                  <select id="deadline-bulk-type">
+                    <option value="corp">法人の確定申告（決算月の2か月後の月末）</option>
+                    <option value="withholding">源泉所得税の納付（毎月10日・納期の特例は7/10と1/20）</option>
+                    <option value="yearend">年末の定型（法定調書・償却資産・給与支払報告 → 1/31）</option>
+                    <option value="personal">個人の確定申告（3/15）</option>
+                  </select>
+                </label>
+                <label>期限日の年 <input id="deadline-bulk-year" type="number" min="2020" max="2100"></label>
+                <label>担当<select id="deadline-bulk-assignee"></select></label>
+                <label id="deadline-bulk-method-line">源泉の納付
+                  <select id="deadline-bulk-method"><option value="auto">台帳の項目に合わせる</option><option value="monthly">毎月</option><option value="special">納期の特例</option></select>
+                </label>
+                <label id="deadline-bulk-consumption-line" class="check-line"><input type="checkbox" id="deadline-bulk-consumption"> 個人の消費税（3/31）も作る</label>
+              </div>
+              <p class="hint">期限日が土日のときは、翌月曜日にします。祝日には合わせないので、祝日に当たるものは作ったあとに直してください。同じ種類・顧問先・期限日のものがすでにあれば作りません。</p>
+              <div class="table-wrap">
+                <table class="clients-table">
+                  <thead><tr><th>作る</th><th>顧問先</th><th>台帳の情報</th><th>作る期限</th></tr></thead>
+                  <tbody id="deadline-bulk-list"></tbody>
+                </table>
+              </div>
+              <div class="ed-actions">
+                <button type="button" id="deadline-bulk-run" class="button">チェックした顧問先の期限を作る</button>
+                <button type="button" id="deadline-bulk-cancel" class="button button-outline">閉じる</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="staff-card">
+          <h2>設定（顧客台帳の項目）</h2>
+          <p class="hint">期限をまとめて作るときに、顧客台帳のどの項目を使うかを選びます。項目の中身（例：「3月」「3」）から月を読み取ります。源泉の納付方法の項目は、中身に「特例」とあれば納期の特例として扱います。</p>
+          <div class="todo-form todo-form-row">
+            <label>台帳<select id="deadline-set-register"><option value="">選んでください</option></select></label>
+            <label>決算月の項目<select id="deadline-set-month"><option value="">なし</option></select></label>
+            <label>源泉の納付方法の項目（任意）<select id="deadline-set-withholding"><option value="">なし</option></select></label>
+          </div>
+          <div class="ed-actions"><button type="button" id="deadline-set-save" class="button">設定を保存</button></div>
         </section>
       </div>
 
@@ -441,18 +521,19 @@
     </div>
   </footer>
 
-  <script src="/form/crypto.js?v=20261009-6"></script>
-  <script src="/form/render.js?v=20261009-6"></script>
-  <script src="/form/values.js?v=20261009-6"></script>
-  <script src="/staff/common.js?v=20261009-6"></script>
-  <script src="/staff/staff.js?v=20261009-6"></script>
-  <script src="/staff/forms.js?v=20261009-6"></script>
-  <script src="/staff/form-editor.js?v=20261009-6"></script>
-  <script src="/staff/unlock.js?v=20261009-6"></script>
-  <script src="/staff/register.js?v=20261009-6"></script>
-  <script src="/staff/activities.js?v=20261009-6"></script>
-  <script src="/staff/todo.js?v=20261009-6"></script>
-  <script src="/staff/claude.js?v=20261009-6"></script>
-  <script src="/staff/app.js?v=20261009-6"></script>
+  <script src="/form/crypto.js?v=20261009-7"></script>
+  <script src="/form/render.js?v=20261009-7"></script>
+  <script src="/form/values.js?v=20261009-7"></script>
+  <script src="/staff/common.js?v=20261009-7"></script>
+  <script src="/staff/staff.js?v=20261009-7"></script>
+  <script src="/staff/forms.js?v=20261009-7"></script>
+  <script src="/staff/form-editor.js?v=20261009-7"></script>
+  <script src="/staff/unlock.js?v=20261009-7"></script>
+  <script src="/staff/register.js?v=20261009-7"></script>
+  <script src="/staff/activities.js?v=20261009-7"></script>
+  <script src="/staff/todo.js?v=20261009-7"></script>
+  <script src="/staff/deadline.js?v=20261009-7"></script>
+  <script src="/staff/claude.js?v=20261009-7"></script>
+  <script src="/staff/app.js?v=20261009-7"></script>
 </body>
 </html>

@@ -135,6 +135,11 @@ async function openLedgerEdit(code) {
     empty.textContent = '対応の記録を読み込めませんでした。';
     empty.hidden = false;
   });
+  await loadLedgerDeadlines().catch(() => {
+    const empty = document.getElementById('register-deadlines-empty');
+    empty.textContent = '期限を読み込めませんでした。';
+    empty.hidden = false;
+  });
   await loadLedgerTodos().catch(() => {
     const empty = document.getElementById('register-todos-empty');
     empty.textContent = 'TODOを読み込めませんでした。';
@@ -244,6 +249,22 @@ function showInPanel(heading, fields, answers, layout) {
   view.replaceChildren(title, grid, close);
   view.hidden = false;
   view.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// --- 期限（deadline.js）。済んでいないものを期限日の順に ---
+
+async function loadLedgerDeadlines() {
+  const list = await clientDeadlines(ledgerCode);
+  document.getElementById('register-deadlines').replaceChildren(...list.map((d) => {
+    const li = document.createElement('li');
+    const span = document.createElement('span');
+    span.textContent = `${dueLabel(d.value.due)}　${d.value.kind}　${memberName(d.value.assignee)}・${DEADLINE_STATUS[d.value.status] || '未着手'}`;
+    li.append(span);
+    return li;
+  }));
+  const empty = document.getElementById('register-deadlines-empty');
+  empty.textContent = '期限はありません。';
+  empty.hidden = list.length > 0;
 }
 
 // --- 関係する TODO（todo.js） ---

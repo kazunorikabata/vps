@@ -28,6 +28,7 @@ function route() {
   message.hidden = true;
   if (r.kind) setKind(r.kind, arg ? decodeURIComponent(arg) : undefined);
   if (key === 'todo') run(startTodo);
+  if (key === 'deadline') run(startDeadline);
   window.scrollTo({ top: 0 });
 }
 
@@ -41,6 +42,7 @@ function keyOpened() {
   const name = currentRoute();
   if (name === 'register') registerKeyChanged();
   if (name === 'todo') run(loadTodos);
+  if (name === 'deadline') run(loadDeadlines);
 }
 
 window.addEventListener('hashchange', route);
