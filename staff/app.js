@@ -27,7 +27,20 @@ function route() {
   document.title = `${r.title || KIND_TITLES[r.kind]}｜事務所内｜蒲田和紀税理士事務所`;
   message.hidden = true;
   if (r.kind) setKind(r.kind, arg ? decodeURIComponent(arg) : undefined);
+  if (key === 'todo') run(startTodo);
   window.scrollTo({ top: 0 });
+}
+
+function currentRoute() {
+  const name = location.hash.slice(1).split('/')[0];
+  return ROUTES[name] ? name : 'clients';
+}
+
+// 鍵が開いたとき（forms.js の showKey から）。今の画面の中身を読み込み直す
+function keyOpened() {
+  const name = currentRoute();
+  if (name === 'register') registerKeyChanged();
+  if (name === 'todo') run(loadTodos);
 }
 
 window.addEventListener('hashchange', route);

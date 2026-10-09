@@ -135,6 +135,11 @@ async function openLedgerEdit(code) {
     empty.textContent = '対応の記録を読み込めませんでした。';
     empty.hidden = false;
   });
+  await loadLedgerTodos().catch(() => {
+    const empty = document.getElementById('register-todos-empty');
+    empty.textContent = 'TODOを読み込めませんでした。';
+    empty.hidden = false;
+  });
   await loadLedgerHistory();
   document.getElementById('register-edit').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -239,6 +244,23 @@ function showInPanel(heading, fields, answers, layout) {
   view.replaceChildren(title, grid, close);
   view.hidden = false;
   view.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// --- 関係する TODO（todo.js） ---
+
+async function loadLedgerTodos() {
+  const code = ledgerCode;
+  const list = await clientTodos(code);
+  document.getElementById('register-todos').replaceChildren(...list.map((t) => {
+    const li = document.createElement('li');
+    const span = document.createElement('span');
+    span.textContent = `${dueLabel(t.value.due)}　${t.value.title}　${memberName(t.value.assignee)}・${TODO_STATUS[t.value.status] || '未着手'}`;
+    li.append(span);
+    return li;
+  }));
+  const empty = document.getElementById('register-todos-empty');
+  empty.textContent = '関係するTODOはありません。';
+  empty.hidden = list.length > 0;
 }
 
 // --- 履歴（保存した版） ---

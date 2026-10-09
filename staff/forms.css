@@ -154,6 +154,23 @@
 .register-edit { margin: 20px 0; padding: 16px; border: 2px solid var(--navy); }
 .register-edit h3 { margin: 0 0 12px; font-size: 1.1rem; }
 .register-client { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 0 0 16px; }
+/* TODO */
+.todo-toolbar { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; margin-bottom: 12px; }
+.todo-toolbar label { display: flex; gap: 6px; align-items: center; font-weight: 700; }
+.todo-toolbar select, .todo-form input, .todo-form select, .todo-form textarea {
+  padding: 6px 8px; border: 1px solid var(--line); font-family: inherit; font-size: 0.95rem;
+}
+.todo-form { display: flex; flex-direction: column; gap: 10px; }
+.todo-form > label { display: flex; flex-direction: column; gap: 4px; font-weight: 700; }
+.todo-form-row { display: flex; flex-wrap: wrap; gap: 10px 16px; }
+.todo-form-row label { display: flex; flex-direction: column; gap: 4px; font-weight: 700; }
+.todo-table tr.is-overdue td { background: #fbeeed; }
+.todo-table tr.is-overdue td:first-child { color: #b3261e; font-weight: 700; }
+.todo-table tr.is-soon td:first-child { color: #8a5a00; font-weight: 700; }
+.todo-table tr.is-done td { color: #888; text-decoration: line-through; }
+.todo-table tr.is-done td.ops { text-decoration: none; }
+.todo-priority-high { color: #b3261e; font-weight: 700; }
+
 /* どの画面でも上に出す、鍵を開く欄 */
 .keybar { margin: 0 0 24px; padding: 12px 16px; background: #fff; border: 1px solid var(--line); }
 .keybar .key-loaded { margin: 0 0 8px; }

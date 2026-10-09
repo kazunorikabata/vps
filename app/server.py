@@ -52,7 +52,8 @@ STAFF_PORT = int(os.environ.get("UPLOAD_STAFF_PORT", "8082"))
 MAX_SIZE = 50 * 1024 * 1024
 MAX_BODY = 4096
 # 既定より大きい本文を受け付ける API（nginx の client_max_body_size もあわせる）
-BODY_LIMITS = {"/form/submit": 256 * 1024, "/office/submit": 256 * 1024, "/register/save": 256 * 1024, "/unlocks/add": 16 * 1024, "/forms/save": 64 * 1024, "/key/set": 8192}
+BODY_LIMITS = {"/form/submit": 256 * 1024, "/office/submit": 256 * 1024, "/register/save": 256 * 1024,
+               "/store/save": 256 * 1024, "/members/save": 16 * 1024, "/unlocks/add": 16 * 1024, "/forms/save": 64 * 1024, "/key/set": 8192}
 MAX_RECORD = 512 * 1024   # 事務所内ページで開く入力内容のファイルの大きさの上限
 RATE_LIMIT = 60      # 1つのURLから1時間に受け付ける件数
 RATE_WINDOW = 3600
@@ -104,6 +105,14 @@ ROW_ID_RE = re.compile(r"^R[0-9a-f]{16}$")
 OFFICE_CODE = "事務所"
 REGISTERS_FILE = os.path.join(DATA_DIR, "registers-folder.json")   # 「顧客台帳」フォルダ
 REGISTERS_NAME = "顧客台帳"
+MEMBERS_FILE = os.path.join(DATA_DIR, "staff-members.json")   # 職員の一覧（事務所内ページのID と表示名。TODO の担当に使う）
+# 事務所の管理（TODO など）：1件ずつ暗号化して、「事務所の記録」フォルダのスプレッドシートに入れる。
+# 直すたびに行を足し、項目の番号ごとにいちばん新しい行が今の内容（前の行は履歴）。削除も「削除」の行を足す
+STORES = {"todo": "TODO"}
+ITEM_ID_RE = re.compile(r"^T[0-9a-f]{12}$")
+STORE_HEADER = ["番号", "保存日時", "項目の番号", "保存した職員", "削除", "", "暗号化の鍵", "包んだ鍵", "iv",
+                *[f"データ{i}" for i in range(1, MAX_CHUNKS + 1)]]
+MEMBER_ID_RE = re.compile(r"^[\w.@-]{1,50}$")
 FIELD_ID_RE = re.compile(r"^[a-z0-9_]{1,40}$")
 B64_RE = re.compile(r"^[A-Za-z0-9+/]+={0,2}$")
 
@@ -362,7 +371,7 @@ def sheets_call(method, path, **kw):
     return r.json()
 
 
-def sheets_create(folder_id, name):
+def sheets_create(folder_id, name, header=None):
     """フォルダにスプレッドシートを作り、「入力内容」「項目」のシートと見出しを用意する"""
     r = requests.post(
         DRIVE_API,
@@ -378,7 +387,7 @@ def sheets_create(folder_id, name):
             {"updateSheetProperties": {"properties": {"sheetId": 0, "title": MAIN_SHEET}, "fields": "title"}},
             {"addSheet": {"properties": {"sheetId": 1, "title": FIELDS_SHEET}}},
         ]})
-        sheets_append(sid, MAIN_SHEET, [SHEET_HEADER])
+        sheets_append(sid, MAIN_SHEET, [header or SHEET_HEADER])
         sheets_append(sid, FIELDS_SHEET, [["項目の版", "項目（JSON）"]])
     except Exception:
         trash_file(sid)   # 作りかけを残さない（次の送信でまた作り直す）
@@ -1101,6 +1110,98 @@ def handle_register_activities(body):
     return {"activities": items, "forms": [{"id": fid, "title": f["title"]} for fid, f in targets]}
 
 
+# --- 事務所の管理（TODO など） ---
+
+def store_sheet(store):
+    with _sheets_lock:
+        sheets = load_json(SHEETS_FILE)
+        key = f"store:{store}"
+        info = sheets.get(key)
+        if not info:
+            info = {"id": sheets_create(office_folder(), f"事務所の管理_{STORES[store]}", STORE_HEADER), "versions": []}
+            sheets[key] = info
+            save_json(SHEETS_FILE, sheets)
+        return info
+
+
+def check_store(store):
+    if store not in STORES:
+        raise UploadError(404, "見つかりません。")
+    return store
+
+
+def handle_store_list(body):
+    """項目ごとのいちばん新しい内容（暗号化したまま）。削除したものは出さない"""
+    store = check_store(body.get("store"))
+    info = load_json(SHEETS_FILE).get(f"store:{store}")
+    latest = {}
+    if info:
+        for row in sheets_values(info["id"], MAIN_SHEET, "A2:Q"):
+            row = row + [""] * (len(STORE_HEADER) - len(row))
+            if ROW_ID_RE.match(row[0]) and ITEM_ID_RE.match(row[2]):
+                if row[2] not in latest or parse_time(row[1]) >= parse_time(latest[row[2]][1]):
+                    latest[row[2]] = row
+    items = [{"id": r[2], "saved": r[1], "staff": r[3],
+              "encrypted": {"keyId": r[6], "key": r[7], "iv": r[8], "data": "".join(r[9:])}}
+             for r in latest.values() if r[4] != "1"]
+    return {"items": items}
+
+
+def store_append(store, item_id, staff, deleted=False, encrypted=None):
+    info = store_sheet(store)
+    keys, data = ["", "", ""], ""
+    if encrypted:
+        keys, data = [encrypted["keyId"], encrypted["key"], encrypted["iv"]], encrypted["data"]
+    parts = chunks(data)
+    if len(parts) > MAX_CHUNKS:
+        raise UploadError(400, "内容が大きすぎます。")
+    now = datetime.now(JST).isoformat(timespec="seconds")
+    sheets_append(info["id"], MAIN_SHEET, [["R" + secrets.token_hex(8), now, item_id, staff,
+                                            "1" if deleted else "", "", *keys, *parts]])
+    return now
+
+
+def handle_store_save(body):
+    store = check_store(body.get("store"))
+    item_id = body.get("id") or "T" + secrets.token_hex(6)
+    if not isinstance(item_id, str) or not ITEM_ID_RE.match(item_id):
+        raise UploadError(400, "番号が正しくありません。")
+    saved = store_append(store, item_id, staff_name(body), encrypted=check_encrypted(body.get("encrypted")))
+    log.info("store saved store=%s id=%s staff=%s", store, item_id, staff_name(body))
+    return {"id": item_id, "saved": saved}
+
+
+def handle_store_remove(body):
+    store = check_store(body.get("store"))
+    item_id = body.get("id")
+    if not isinstance(item_id, str) or not ITEM_ID_RE.match(item_id):
+        raise UploadError(400, "番号が正しくありません。")
+    store_append(store, item_id, staff_name(body), deleted=True)
+    log.info("store removed store=%s id=%s staff=%s", store, item_id, staff_name(body))
+    return {"ok": True}
+
+
+# --- 職員の一覧（TODO の担当に使う。ID は秘密ではないので暗号化しない） ---
+
+def handle_members_list(body):
+    return {"members": load_json(MEMBERS_FILE).get("members", []), "me": body.get("_staff") or ""}
+
+
+def handle_members_save(body):
+    members = body.get("members")
+    if not isinstance(members, list) or len(members) > 50:
+        raise UploadError(400, "職員は50人までです。")
+    seen, result = set(), []
+    for m in members:
+        if not isinstance(m, dict) or not isinstance(m.get("id"), str) or not MEMBER_ID_RE.match(m["id"]) or m["id"] in seen:
+            raise UploadError(400, "職員のIDが正しくありません（事務所内ページにログインするIDを入れてください）。")
+        seen.add(m["id"])
+        result.append({"id": m["id"], "name": text(m.get("name", ""), 30, "表示名")})
+    with _forms_lock:
+        save_json(MEMBERS_FILE, {"members": result})
+    return {"members": result}
+
+
 def client_view(token, client):
     return {
         "code": client["code"],
@@ -1533,6 +1634,11 @@ STAFF_ROUTES = {
     "/register/history": handle_register_history,
     "/register/activities": handle_register_activities,
     "/activities/list": handle_register_activities,
+    "/store/list": handle_store_list,
+    "/store/save": handle_store_save,
+    "/store/remove": handle_store_remove,
+    "/members/list": handle_members_list,
+    "/members/save": handle_members_save,
     "/office/get": handle_office_get,
     "/office/submit": handle_office_submit,
     "/office/file-session": handle_office_file_session,
@@ -1544,7 +1650,7 @@ STAFF_ROUTES = {
 # 見るだけの API（変更の記録を残さない）
 STAFF_READ_ONLY = {"/clients/list", "/clients/qr", "/forms/list", "/requests/list", "/requests/qr",
                    "/submissions/list", "/office/get", "/unlocks/list", "/register/records", "/register/history",
-                   "/register/activities", "/activities/list"}
+                   "/register/activities", "/activities/list", "/store/list", "/members/list"}
 
 
 class Handler(BaseHTTPRequestHandler):

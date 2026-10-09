@@ -321,10 +321,10 @@ class FakeSheets:
     def __init__(self):
         self.books = {}
 
-    def create(self, folder_id, name):
+    def create(self, folder_id, name, header=None):
         sid = f"sheet{len(self.books) + 1:06d}"
         self.books[sid] = {"folder": folder_id, "name": name,
-                           server.MAIN_SHEET: [list(server.SHEET_HEADER)], server.FIELDS_SHEET: [["項目の版", "項目（JSON）"]]}
+                           server.MAIN_SHEET: [list(header or server.SHEET_HEADER)], server.FIELDS_SHEET: [["項目の版", "項目（JSON）"]]}
         return sid
 
     def append(self, sid, sheet, rows):
@@ -360,7 +360,7 @@ class FormTest(unittest.TestCase):
         self.dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.dir.cleanup)
         for name in ("CLIENTS_FILE", "FORMS_FILE", "REQUESTS_FILE", "KEY_FILE", "OFFICE_FILE", "UNLOCKS_FILE",
-                     "RECORDS_FILE", "SHEETS_FILE", "REGISTERS_FILE"):
+                     "RECORDS_FILE", "SHEETS_FILE", "REGISTERS_FILE", "MEMBERS_FILE"):
             p = mock.patch.object(server, name, os.path.join(self.dir.name, name.lower()))
             p.start()
             self.addCleanup(p.stop)
@@ -1029,6 +1029,46 @@ class FormTest(unittest.TestCase):
         # 顧問先を選ばない事務所用は、今までどおり「事務所」
         rows = [r for book in self.sheets.books.values() for r in book[server.MAIN_SHEET][1:]]
         self.assertEqual(sorted(r[2] for r in rows), ["C001", "C002", "事務所"])
+
+    # --- 事務所の管理（TODO）・職員の一覧 ---
+
+    def test_todo_store(self):
+        self.set_key()
+        enc = self.encrypted()
+        status, data = self.staff_as("/store/save", {"store": "todo", "encrypted": enc})
+        self.assertEqual(status, 200, data)
+        first = data["id"]
+        self.assertRegex(first, server.ITEM_ID_RE)
+        second = self.staff_as("/store/save", {"store": "todo", "encrypted": enc})[1]["id"]
+        self.assertEqual(self.staff_as("/store/save", {"store": "todo", "id": first, "encrypted": {**enc, "data": "WFla"}}, user="sato")[0], 200)
+        book = next(iter(self.sheets.books.values()))
+        self.assertEqual((book["folder"], book["name"], book[server.MAIN_SHEET][0][2]),
+                         ("folder-事務所の記録", "事務所の管理_TODO", "項目の番号"))
+        status, data = self.staff_as("/store/list", {"store": "todo"})
+        items = {i["id"]: i for i in data["items"]}
+        self.assertEqual(set(items), {first, second})   # 項目ごとに、いちばん新しい1件
+        self.assertEqual((items[first]["staff"], items[first]["encrypted"]["data"]), ("sato", "WFla"))
+        self.assertEqual(self.staff_as("/store/remove", {"store": "todo", "id": second})[0], 200)
+        self.assertEqual([i["id"] for i in self.staff_as("/store/list", {"store": "todo"})[1]["items"]], [first])
+        self.assertEqual(len(self.sheets.rows()), 4)   # 消しても行は残る（履歴）
+
+    def test_todo_store_rejects(self):
+        self.set_key()
+        good = {"store": "todo", "encrypted": self.encrypted()}
+        for bad in ({"store": "other"}, {"id": "../x"}, {"id": "T123"}, {"encrypted": self.encrypted("0" * 64)},
+                    {"encrypted": None}):
+            self.assertIn(self.staff_as("/store/save", {**good, **bad})[0], (400, 404, 409), bad)
+        self.assertEqual(self.post("/store/list", {"store": "todo"})[0], 404)   # 顧問先用の入口からは使えない
+        self.assertEqual(self.sheets.books, {})
+
+    def test_members(self):
+        status, data = self.staff_as("/members/list", {}, user="tanaka")
+        self.assertEqual(data, {"members": [], "me": "tanaka"})
+        members = [{"id": "tanaka", "name": "田中"}, {"id": "sato", "name": ""}]
+        self.assertEqual(self.staff_as("/members/save", {"members": members})[1], {"members": members})
+        self.assertEqual(self.staff_as("/members/list", {})[1]["members"], members)
+        for bad in ([{"id": "a b"}], [{"id": "x"}, {"id": "x"}], [{"id": ""}], "x"):
+            self.assertEqual(self.staff_as("/members/save", {"members": bad})[0], 400, bad)
 
     # --- 顧問先の入力ページ ---
 

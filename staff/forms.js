@@ -153,8 +153,8 @@ function showKey() {
     loaded.textContent = `鍵を読み込みました（${FormCrypto.shortFingerprint(loadedKey.fingerprint)}）`;
     loaded.className = 'key-loaded is-ok';
   }
-  // 顧客台帳を開いていれば、鍵が開いたところで中身を読み込む（register.js）
-  if (loadedKey && formKind === 'register') registerKeyChanged();
+  // 鍵が開いたら、今の画面（顧客台帳・TODO など）の中身を読み込む（app.js）
+  if (loadedKey) keyOpened();
 }
 
 // --- 入力ページの一覧 ---

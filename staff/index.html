@@ -11,9 +11,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&family=Noto+Serif+JP:wght@500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
-  <link rel="stylesheet" href="/staff/staff.css?v=20261009-5">
-  <link rel="stylesheet" href="/form/layout.css?v=20261009-5">
-  <link rel="stylesheet" href="/staff/forms.css?v=20261009-5">
+  <link rel="stylesheet" href="/staff/staff.css?v=20261009-6">
+  <link rel="stylesheet" href="/form/layout.css?v=20261009-6">
+  <link rel="stylesheet" href="/staff/forms.css?v=20261009-6">
 </head>
 <body>
   <!-- 事務所内ページは、この1つのページで画面を切り替える（app.js）。鍵はこのページの中だけに置くので、
@@ -283,6 +283,9 @@
             <div id="register-activity-new" class="register-activity-new"></div>
             <ul id="register-activities" class="register-history"></ul>
             <p id="register-activities-empty" class="hint" hidden>まだ記録がありません。</p>
+            <h4 class="register-history-title">関係するTODO</h4>
+            <ul id="register-todos" class="register-history"></ul>
+            <p id="register-todos-empty" class="hint" hidden>関係するTODOはありません。</p>
             <h4 class="register-history-title">履歴（保存した日時・職員）</h4>
             <ul id="register-history" class="register-history"></ul>
             <div id="register-version" class="sub-view" hidden></div>
@@ -350,7 +353,53 @@
       <div class="view" data-view="todo" hidden>
         <h1 class="section-title">TODO</h1>
         <section class="staff-card">
-          <p>準備中です。やること（内容・担当・期日・状態・関係する顧問先）を、暗号化して管理できるようにします。</p>
+          <p id="todo-locked" class="key-warning">TODO は暗号化しています。見る・直すには、上の欄で鍵を開いてください。</p>
+          <div id="todo-body" hidden>
+            <div class="todo-toolbar">
+              <label>担当 <select id="todo-who"><option value="me">自分の分</option><option value="">全員</option></select></label>
+              <label class="check-line"><input type="checkbox" id="todo-done"> 完了したものも出す</label>
+              <label>顧問先 <select id="todo-client"><option value="">すべて</option></select></label>
+              <button type="button" id="todo-add" class="button button-small">＋TODOを追加</button>
+            </div>
+            <div class="table-wrap">
+              <table class="clients-table todo-table">
+                <thead><tr><th>期日</th><th>内容</th><th>担当</th><th>優先度</th><th>状態</th><th>顧問先</th><th>操作</th></tr></thead>
+                <tbody id="todo-list"></tbody>
+              </table>
+            </div>
+            <p id="todo-empty" class="hint" hidden>表示するTODOはありません。</p>
+
+            <form id="todo-form" class="register-edit todo-form" hidden>
+              <h3 id="todo-form-title"></h3>
+              <label>内容 <span class="required-mark">必須</span><input id="todo-title" maxlength="200" required></label>
+              <label>詳しいメモ<textarea id="todo-memo" rows="3" maxlength="5000"></textarea></label>
+              <div class="todo-form-row">
+                <label>担当<select id="todo-assignee"></select></label>
+                <label>期日<input id="todo-due" type="date"></label>
+                <label>優先度<select id="todo-priority"><option value="high">高</option><option value="normal" selected>中</option><option value="low">低</option></select></label>
+                <label>状態<select id="todo-status"><option value="todo">未着手</option><option value="doing">進行中</option><option value="done">完了</option></select></label>
+                <label>関係する顧問先<select id="todo-client-select"><option value="">なし</option></select></label>
+              </div>
+              <p id="todo-meta" class="hint"></p>
+              <div class="ed-actions">
+                <button type="submit" class="button">保存</button>
+                <button type="button" id="todo-cancel" class="button button-outline">閉じる</button>
+              </div>
+            </form>
+          </div>
+        </section>
+
+        <section class="staff-card">
+          <h2>職員の一覧（TODO の担当）</h2>
+          <p class="hint">事務所内ページにログインするIDと、表示する名前を登録します。IDは暗号化しません。</p>
+          <ul id="members-list" class="register-history"></ul>
+          <form id="members-add" class="add-form">
+            <label for="member-id">ID</label>
+            <input id="member-id" maxlength="50" required placeholder="例：tanaka" autocomplete="off">
+            <label for="member-name">表示名</label>
+            <input id="member-name" maxlength="30" placeholder="例：田中" autocomplete="off">
+            <button type="submit" class="button button-small">追加</button>
+          </form>
         </section>
       </div>
 
@@ -392,17 +441,18 @@
     </div>
   </footer>
 
-  <script src="/form/crypto.js?v=20261009-5"></script>
-  <script src="/form/render.js?v=20261009-5"></script>
-  <script src="/form/values.js?v=20261009-5"></script>
-  <script src="/staff/common.js?v=20261009-5"></script>
-  <script src="/staff/staff.js?v=20261009-5"></script>
-  <script src="/staff/forms.js?v=20261009-5"></script>
-  <script src="/staff/form-editor.js?v=20261009-5"></script>
-  <script src="/staff/unlock.js?v=20261009-5"></script>
-  <script src="/staff/register.js?v=20261009-5"></script>
-  <script src="/staff/activities.js?v=20261009-5"></script>
-  <script src="/staff/claude.js?v=20261009-5"></script>
-  <script src="/staff/app.js?v=20261009-5"></script>
+  <script src="/form/crypto.js?v=20261009-6"></script>
+  <script src="/form/render.js?v=20261009-6"></script>
+  <script src="/form/values.js?v=20261009-6"></script>
+  <script src="/staff/common.js?v=20261009-6"></script>
+  <script src="/staff/staff.js?v=20261009-6"></script>
+  <script src="/staff/forms.js?v=20261009-6"></script>
+  <script src="/staff/form-editor.js?v=20261009-6"></script>
+  <script src="/staff/unlock.js?v=20261009-6"></script>
+  <script src="/staff/register.js?v=20261009-6"></script>
+  <script src="/staff/activities.js?v=20261009-6"></script>
+  <script src="/staff/todo.js?v=20261009-6"></script>
+  <script src="/staff/claude.js?v=20261009-6"></script>
+  <script src="/staff/app.js?v=20261009-6"></script>
 </body>
 </html>
