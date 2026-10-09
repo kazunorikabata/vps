@@ -14,7 +14,12 @@ let current = null;         // 依頼URL・入力内容を表示している入�
 let submissions = [];
 
 showKind();
-run(loadForms);
+// 鍵の開け方の一覧（unlock.js）も続けて読み込む（同時に動かすと、ボタンの使える・使えないが乱れるため）。
+// unlock.js などほかのプログラムを読み終えてから始める
+document.addEventListener('DOMContentLoaded', () => run(async () => {
+  await loadForms();
+  await loadUnlocks();
+}));
 
 function showKind() {
   const office = formKind === 'office';

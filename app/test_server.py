@@ -322,7 +322,7 @@ class FormTest(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.dir.cleanup)
-        for name in ("CLIENTS_FILE", "FORMS_FILE", "REQUESTS_FILE", "KEY_FILE", "OFFICE_FILE"):
+        for name in ("CLIENTS_FILE", "FORMS_FILE", "REQUESTS_FILE", "KEY_FILE", "OFFICE_FILE", "UNLOCKS_FILE"):
             p = mock.patch.object(server, name, os.path.join(self.dir.name, name.lower()))
             p.start()
             self.addCleanup(p.stop)
@@ -739,6 +739,37 @@ class FormTest(unittest.TestCase):
         self.assertEqual(self.staff_as("/office/file-complete", {"formId": form_id, "fileId": "file123456"})[0], 200)
         self.drive["get_file"].return_value["parents"] = [FOLDER]   # 顧問先のフォルダのファイルは扱わない
         self.assertEqual(self.staff_as("/office/file-complete", {"formId": form_id, "fileId": "file123456"})[0], 404)
+
+    # --- 鍵の開け方 ---
+
+    def unlock(self, **kw):
+        return {"id": "credentialId_0123456789", "label": "セキュリティキー1", "kind": "security-key",
+                "fingerprint": server.public_key()["fingerprint"], "kdfSalt": "QUJD", "iv": "QUJD", "data": "QUJD" * 800, **kw}
+
+    def test_unlocks(self):
+        self.set_key()
+        status, data = self.staff("/unlocks/add", self.unlock())
+        self.assertEqual(status, 200, data)
+        self.assertEqual(self.staff("/unlocks/add", self.unlock())[0], 409)   # 同じキーは二重に登録しない
+        self.assertEqual(self.staff("/unlocks/add", self.unlock(id="passkeyId_0123456789", kind="passkey", label="iPhone"))[0], 200)
+        status, data = self.staff("/unlocks/list", {})
+        self.assertEqual([(u["label"], u["kind"]) for u in data["unlocks"]], [("セキュリティキー1", "security-key"), ("iPhone", "passkey")])
+        self.assertEqual(data["unlocks"][0]["data"], "QUJD" * 800)
+        self.assertEqual(self.staff("/unlocks/remove", {"id": "credentialId_0123456789"}), (200, {"ok": True}))
+        self.assertEqual(self.staff("/unlocks/remove", {"id": "credentialId_0123456789"})[0], 404)
+        self.assertEqual(len(self.staff("/unlocks/list", {})[1]["unlocks"]), 1)
+
+    def test_unlocks_rejects(self):
+        before_key = {"id": "credentialId_0123456789", "label": "x", "kind": "passkey", "fingerprint": "0" * 64,
+                      "kdfSalt": "QUJD", "iv": "QUJD", "data": "QUJD"}
+        self.assertEqual(self.staff("/unlocks/add", before_key)[0], 409)   # 鍵の登録前
+        self.set_key()
+        for bad in ({"id": "short"}, {"id": "../../etc"}, {"kind": "usb"}, {"label": ""}, {"data": "not base64!"},
+                    {"data": "QUJD" * 3000}):
+            self.assertEqual(self.staff("/unlocks/add", self.unlock(**bad))[0], 400, bad)
+        self.assertEqual(self.staff("/unlocks/add", self.unlock(fingerprint="0" * 64))[0], 409)   # 別の鍵
+        # 顧問先用の入口からは使えない
+        self.assertEqual(self.post("/unlocks/list", {})[0], 404)
 
     def test_layout_answers(self):
         form = self.layout_form()

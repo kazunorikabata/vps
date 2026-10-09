@@ -22,6 +22,7 @@
   - 事務所用（`kind: office`）は URL を発行せず、職員が `staff/entry.html#入力ページの番号` で入力する（`form/form.js` を `data-mode="office"` で使い、`/api/staff/office/` に送る）。保存先はドライブの「事務所の記録」フォルダで、入力した職員（ベーシック認証のユーザー名）を残す
   - 入力内容は顧問先のブラウザで事務所の公開鍵により暗号化し（`form/crypto.js`。RSA-OAEP 4096 + AES-GCM）、`/api/form/` → `127.0.0.1:8081/form/` を通って顧問先のドライブのフォルダに JSON で保存する。VPS に入力内容は残さない
   - 秘密鍵は職員のブラウザで作り、パスワードで暗号化したファイルとして職員が保管する。VPS・ドライブ・リポジトリに置かない。復号は `staff/forms.html` の中だけで行う
+  - ふだんは「鍵の開け方」で開く（`staff/unlock.js`）。セキュリティキー（PC の Chrome・Edge）か iPhone のパスキーから WebAuthn の PRF で取り出した秘密とパスワードで秘密鍵を閉じ、`/var/lib/kabaoffice-upload/key-unlocks.json` に預ける。キーの機器とパスワードの両方がないと開けない。鍵のファイルは予備として残す
   - 入力ページごとに暗号化を外せるが、マイナンバーの項目があるものは外せない（サーバーでも確認）
   - 部品は横12マスのマス目に幅（`width`）で並べる（区切り線・説明文・空白・枠、行が決まった表・合計・列幅も）。表示は `form/render.js` と `form/layout.css` を顧問先の画面・PDF・事務所内ページで共通に使い、作成画面は `staff/form-editor.js`
   - VPS 上の配置：入力ページの定義 `forms.json`、URLの対応表 `form-requests.json`、公開鍵 `public-key.json`（いずれも `/var/lib/kabaoffice-upload/`）

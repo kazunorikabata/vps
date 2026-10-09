@@ -14,7 +14,13 @@
   border: 1px solid var(--line);
 }
 .key-form label { display: flex; flex-direction: column; gap: 4px; font-weight: 700; }
-.key-form input[type="password"] { width: 20em; max-width: 100%; padding: 8px 10px; border: 1px solid var(--line); font-size: 1rem; }
+.key-form input[type="password"], .unlock-open input[type="password"], .key-form input:not([type]), .key-form select {
+  width: 20em; max-width: 100%; padding: 8px 10px; border: 1px solid var(--line); font-family: inherit; font-size: 1rem;
+}
+/* キー・iPhone で開く欄（いちばん上に出す） */
+.unlock-open { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin: 0 0 16px; padding: 16px; background: #f6f2ea; }
+.unlock-open label { display: flex; flex-direction: column; gap: 4px; font-weight: 700; }
+.unlock-open .hint { flex-basis: 100%; margin: 0; }
 .check-line { display: inline-flex !important; flex-direction: row !important; align-items: center; gap: 8px; font-weight: 400 !important; }
 .check-line[hidden] { display: none !important; }
 

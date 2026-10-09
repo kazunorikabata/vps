@@ -38,6 +38,7 @@ FORMS_FILE = os.path.join(DATA_DIR, "forms.json")              # 入力ページ
 REQUESTS_FILE = os.path.join(DATA_DIR, "form-requests.json")   # 入力ページのURLの鍵 → 顧問先と入力ページ
 KEY_FILE = os.path.join(DATA_DIR, "public-key.json")           # 事務所の公開鍵（暗号化用。復号はできない）
 OFFICE_FILE = os.path.join(DATA_DIR, "office-folder.json")      # 「事務所の記録」フォルダ（事務所用の入力ページの保存先）
+UNLOCKS_FILE = os.path.join(DATA_DIR, "key-unlocks.json")       # 鍵の開け方（セキュリティキー・パスキーとパスワードで閉じた秘密鍵）
 ROOT_NAME = "顧問先資料"
 ALLOWED_ORIGIN = os.environ.get("UPLOAD_ALLOWED_ORIGIN", "https://kabaoffice.com")
 UPLOAD_BASE_URL = ALLOWED_ORIGIN + "/upload/#"
@@ -48,7 +49,7 @@ STAFF_PORT = int(os.environ.get("UPLOAD_STAFF_PORT", "8082"))
 MAX_SIZE = 50 * 1024 * 1024
 MAX_BODY = 4096
 # 既定より大きい本文を受け付ける API（nginx の client_max_body_size もあわせる）
-BODY_LIMITS = {"/form/submit": 256 * 1024, "/office/submit": 256 * 1024, "/forms/save": 64 * 1024, "/key/set": 8192}
+BODY_LIMITS = {"/form/submit": 256 * 1024, "/office/submit": 256 * 1024, "/unlocks/add": 16 * 1024, "/forms/save": 64 * 1024, "/key/set": 8192}
 MAX_RECORD = 512 * 1024   # 事務所内ページで開く入力内容のファイルの大きさの上限
 RATE_LIMIT = 60      # 1つのURLから1時間に受け付ける件数
 RATE_WINDOW = 3600
@@ -975,6 +976,60 @@ def handle_key_set(body):
     return {"key": {"fingerprint": key["fingerprint"], "set": key["set"]}}
 
 
+# --- 鍵の開け方 ---
+# 秘密鍵を「セキュリティキー（またはパスキー）から取り出した秘密＋パスワード」で閉じたものを預かる。
+# 閉じる・開くは職員のブラウザで行う。ここにあるものだけでは開けない（キーの機器とパスワードの両方が要る）
+UNLOCK_KINDS = {"security-key", "passkey"}
+CREDENTIAL_ID_RE = re.compile(r"^[A-Za-z0-9_-]{16,1400}$")
+FINGERPRINT_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def handle_unlocks_list(body):
+    return {"unlocks": [{"id": i, **u} for i, u in load_json(UNLOCKS_FILE).items()]}
+
+
+def handle_unlocks_add(body):
+    cid = body.get("id")
+    if not isinstance(cid, str) or not CREDENTIAL_ID_RE.match(cid):
+        raise UploadError(400, "キーの情報が正しくありません。")
+    if body.get("kind") not in UNLOCK_KINDS:
+        raise UploadError(400, "種類が正しくありません。")
+    fingerprint = body.get("fingerprint")
+    key = public_key()
+    # 登録済みの鍵（今の公開鍵）の開け方だけを受け付ける
+    if not key or fingerprint != key["fingerprint"]:
+        raise UploadError(409, "登録済みの鍵とは別の鍵のファイルです。今の鍵のファイルで登録してください。")
+    unlock = {
+        "label": text(body.get("label"), 50, "名前", required=True),
+        "kind": body["kind"],
+        "fingerprint": fingerprint,
+        "kdfSalt": check_b64(body.get("kdfSalt"), 64),
+        "iv": check_b64(body.get("iv"), 64),
+        "data": check_b64(body.get("data"), 8192),
+        "created": f"{datetime.now(JST):%Y-%m-%d %H:%M}",
+    }
+    with _forms_lock:
+        unlocks = load_json(UNLOCKS_FILE)
+        if cid in unlocks:
+            raise UploadError(409, "このキーはすでに登録されています。")
+        if len(unlocks) >= 20:
+            raise UploadError(400, "開け方は20個までです。使わないものを削除してください。")
+        unlocks[cid] = unlock
+        save_json(UNLOCKS_FILE, unlocks)
+    return {"unlock": {"id": cid, **unlock}}
+
+
+def handle_unlocks_remove(body):
+    cid = body.get("id")
+    with _forms_lock:
+        unlocks = load_json(UNLOCKS_FILE)
+        if not isinstance(cid, str) or cid not in unlocks:
+            raise UploadError(404, "見つかりません。")
+        del unlocks[cid]
+        save_json(UNLOCKS_FILE, unlocks)
+    return {"ok": True}
+
+
 def request_view(token, req):
     return {"token": token, "code": req["code"], "created": req.get("created", ""), "url": FORM_BASE_URL + token}
 
@@ -1113,10 +1168,13 @@ STAFF_ROUTES = {
     "/office/submit": handle_office_submit,
     "/office/file-session": handle_office_file_session,
     "/office/file-complete": handle_office_file_complete,
+    "/unlocks/list": handle_unlocks_list,
+    "/unlocks/add": handle_unlocks_add,
+    "/unlocks/remove": handle_unlocks_remove,
 }
 # 見るだけの API（変更の記録を残さない）
 STAFF_READ_ONLY = {"/clients/list", "/clients/qr", "/forms/list", "/requests/list", "/requests/qr",
-                   "/submissions/list", "/office/get"}
+                   "/submissions/list", "/office/get", "/unlocks/list"}
 
 
 class Handler(BaseHTTPRequestHandler):

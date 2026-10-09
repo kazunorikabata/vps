@@ -11,9 +11,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&family=Noto+Serif+JP:wght@500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
-  <link rel="stylesheet" href="/staff/staff.css?v=20261008-11">
-  <link rel="stylesheet" href="/form/layout.css?v=20261008-11">
-  <link rel="stylesheet" href="/staff/forms.css?v=20261008-11">
+  <link rel="stylesheet" href="/staff/staff.css?v=20261009-1">
+  <link rel="stylesheet" href="/form/layout.css?v=20261009-1">
+  <link rel="stylesheet" href="/staff/forms.css?v=20261009-1">
 </head>
 <body>
   <header class="site-header">
@@ -50,8 +50,15 @@
         <p id="key-status"></p>
         <p id="key-loaded" class="key-loaded"></p>
 
+        <!-- ふだんはセキュリティキー（PC）か iPhone のパスキーと、パスワードで開く -->
+        <form id="unlock-open" class="unlock-open" hidden>
+          <label>パスワード <input type="password" id="unlock-pass" required autocomplete="off"></label>
+          <button type="submit" class="button">キー・iPhoneで鍵を開く</button>
+          <p class="hint">PC は Chrome か Edge でセキュリティキーを差して触れてください。iPhone は Safari で Face ID を使います。</p>
+        </form>
+
         <div class="key-actions">
-          <button type="button" id="key-open-show" class="button">鍵を読み込む</button>
+          <button type="button" id="key-open-show" class="button button-outline">鍵のファイルで開く（予備）</button>
           <button type="button" id="key-create-show" class="button button-outline">鍵を作る</button>
         </div>
 
@@ -79,6 +86,32 @@
           <button type="button" id="key-register" class="button" disabled>この鍵を登録する</button>
           <p class="hint">鍵のファイルは、入力内容を開く職員の間だけで共有してください。メールやチャットでは送らないでください。</p>
         </div>
+
+        <h3 class="ed-subtitle">鍵の開け方（セキュリティキー・iPhone）</h3>
+        <div class="table-wrap">
+          <table class="clients-table">
+            <thead><tr><th>名前</th><th>種類</th><th>登録日</th><th>操作</th></tr></thead>
+            <tbody id="unlock-list"></tbody>
+          </table>
+        </div>
+        <p id="unlock-empty" class="hint" hidden>まだ登録されていません。登録すると、鍵のファイルを使わずに、キーやiPhoneとパスワードで開けるようになります。</p>
+        <button type="button" id="unlock-add-show" class="button button-outline">開け方を登録する</button>
+
+        <form id="unlock-add" class="key-form" hidden>
+          <label>名前 <input id="unlock-label" maxlength="50" required placeholder="例：セキュリティキー1、所長のiPhone"></label>
+          <label>種類
+            <select id="unlock-kind">
+              <option value="security-key">セキュリティキー（PC の Chrome・Edge で使う）</option>
+              <option value="passkey">この iPhone（Face ID・パスキー）</option>
+            </select>
+          </label>
+          <label>鍵のファイル <input type="file" id="unlock-file" accept=".json,application/json" required></label>
+          <label>鍵のファイルのパスワード <input type="password" id="unlock-file-pass" required autocomplete="off"></label>
+          <label>この開け方で使うパスワード（12文字以上） <input type="password" id="unlock-pass1" minlength="12" required autocomplete="new-password"></label>
+          <label>（確認） <input type="password" id="unlock-pass2" minlength="12" required autocomplete="new-password"></label>
+          <button type="submit" class="button">登録する</button>
+          <p class="hint">登録のときだけ、今の鍵のファイルを使います。iPhone で登録するときは、鍵のファイルを一時的に iPhone に移し、登録が終わったら iPhone から削除してください。登録したキーやiPhoneをなくしたときは、ここで削除してください。</p>
+        </form>
       </section>
 
       <!-- 入力ページの一覧 -->
@@ -210,9 +243,10 @@
     </div>
   </footer>
 
-  <script src="/form/crypto.js?v=20261008-11"></script>
-  <script src="/form/render.js?v=20261008-11"></script>
-  <script src="/staff/forms.js?v=20261008-11"></script>
-  <script src="/staff/form-editor.js?v=20261008-11"></script>
+  <script src="/form/crypto.js?v=20261009-1"></script>
+  <script src="/form/render.js?v=20261009-1"></script>
+  <script src="/staff/forms.js?v=20261009-1"></script>
+  <script src="/staff/form-editor.js?v=20261009-1"></script>
+  <script src="/staff/unlock.js?v=20261009-1"></script>
 </body>
 </html>

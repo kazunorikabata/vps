@@ -75,6 +75,53 @@ const FormCrypto = (() => {
     return subtle.decrypt({ name: 'AES-GCM', iv }, aesKey, bytes.subarray(FILE_MAGIC.length + 12));
   }
 
+  // --- 鍵の開け方（セキュリティキー・パスキー）---
+  // キーの機器から取り出した秘密（WebAuthn の PRF。機器の外には出ない）と、パスワードの両方から閉じる鍵を作る。
+  // 秘密鍵（PKCS#8）をこの鍵で閉じたものをサーバーに預ける。どちらか片方だけでは開けない
+  const UNLOCK_INFO = new TextEncoder().encode('kabaoffice-unlock-v1');
+
+  async function unlockLockKey(prfOutput, passphrase, kdfSalt, usages) {
+    const pw = await subtle.importKey('raw', new TextEncoder().encode(passphrase), 'PBKDF2', false, ['deriveBits']);
+    const pwBits = await subtle.deriveBits({ name: 'PBKDF2', salt: kdfSalt, iterations: PBKDF2_ITERATIONS, hash: 'SHA-256' }, pw, 256);
+    const ikm = await subtle.importKey('raw', prfOutput, 'HKDF', false, ['deriveKey']);
+    return subtle.deriveKey({ name: 'HKDF', hash: 'SHA-256', salt: pwBits, info: UNLOCK_INFO },
+      ikm, { name: 'AES-GCM', length: 256 }, false, usages);
+  }
+
+  // 鍵のファイルとパスワードから、秘密鍵の中身を取り出す（開け方を登録するときだけ使う）
+  async function exportFromFile(file, passphrase) {
+    if (!file || file.type !== 'kabaoffice-private-key' || file.version !== 1) {
+      throw new Error('鍵のファイルではありません');
+    }
+    const lockKey = await passphraseKey(passphrase, fromB64(file.kdf.salt), ['decrypt']);
+    try {
+      const pkcs8 = await subtle.decrypt({ name: 'AES-GCM', iv: fromB64(file.iv) }, lockKey, fromB64(file.privateKey));
+      return { pkcs8: new Uint8Array(pkcs8), fingerprint: file.fingerprint };
+    } catch {
+      throw new Error('鍵のファイルのパスワードが違います');
+    }
+  }
+
+  async function sealForUnlock(pkcs8, prfOutput, passphrase) {
+    const kdfSalt = random(16);
+    const iv = random(12);
+    const lockKey = await unlockLockKey(prfOutput, passphrase, kdfSalt, ['encrypt']);
+    const data = await subtle.encrypt({ name: 'AES-GCM', iv }, lockKey, pkcs8);
+    return { kdfSalt: toB64(kdfSalt), iv: toB64(iv), data: toB64(data) };
+  }
+
+  // 預けてあるものを開いて、秘密鍵をこのページの中だけで使える形（書き出せない）にする
+  async function openWithUnlock(unlock, prfOutput, passphrase) {
+    const lockKey = await unlockLockKey(prfOutput, passphrase, fromB64(unlock.kdfSalt), ['unwrapKey']);
+    try {
+      const privateKey = await subtle.unwrapKey('pkcs8', fromB64(unlock.data), lockKey,
+        { name: 'AES-GCM', iv: fromB64(unlock.iv) }, RSA, false, ['unwrapKey']);
+      return { privateKey, fingerprint: unlock.fingerprint };
+    } catch {
+      throw new Error('パスワードが違います');
+    }
+  }
+
   async function passphraseKey(passphrase, salt, usages) {
     const base = await subtle.importKey('raw', new TextEncoder().encode(passphrase), 'PBKDF2', false, ['deriveKey']);
     return subtle.deriveKey({ name: 'PBKDF2', salt, iterations: PBKDF2_ITERATIONS, hash: 'SHA-256' },
@@ -119,5 +166,6 @@ const FormCrypto = (() => {
     }
   }
 
-  return { supported, fingerprint, shortFingerprint, encrypt, decrypt, encryptFile, decryptFile, createKey, openKey };
+  return { supported, fingerprint, shortFingerprint, encrypt, decrypt, encryptFile, decryptFile, createKey, openKey,
+    exportFromFile, sealForUnlock, openWithUnlock };
 })();
