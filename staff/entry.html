@@ -11,9 +11,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&family=Noto+Serif+JP:wght@500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
-  <link rel="stylesheet" href="/staff/staff.css?v=20261009-4">
-  <link rel="stylesheet" href="/form/layout.css?v=20261009-4">
-  <link rel="stylesheet" href="/form/form.css?v=20261009-4">
+  <link rel="stylesheet" href="/staff/staff.css?v=20261009-5">
+  <link rel="stylesheet" href="/form/layout.css?v=20261009-5">
+  <link rel="stylesheet" href="/form/form.css?v=20261009-5">
 </head>
 <!-- 事務所用の入力ページ（職員が入力する）。中身は顧問先の入力画面（/form/）と同じ部品と form.js を使う -->
 <body data-mode="office">
@@ -31,13 +31,19 @@
     <div class="container staff-layout">
       <nav class="staff-sidebar" aria-label="事務所内のメニュー">
         <p class="staff-sidebar-group">顧問先の管理</p>
-        <a href="/staff/" data-nav="clients">顧問先の登録・URL</a>
-        <a href="/staff/forms.html" data-nav="forms">顧問先用の入力ページ</a>
-        <a href="/staff/forms.html?kind=register" data-nav="register">顧客台帳</a>
+        <a href="/staff/#clients" data-nav="clients">顧問先の一覧</a>
+        <a href="/staff/#activity" data-nav="activity">応対履歴</a>
+        <a href="/staff/#forms" data-nav="forms">顧問先用の入力ページ</a>
+        <a href="/staff/#register" data-nav="register">顧客台帳</a>
         <p class="staff-sidebar-group">事務所の管理</p>
-        <a href="/staff/forms.html?kind=office" data-nav="office" class="is-current">事務所用の入力ページ</a>
+        <a href="/staff/#todo" data-nav="todo">TODO</a>
+        <a href="/staff/#deadline" data-nav="deadline">期限の管理</a>
+        <a href="/staff/#schedule" data-nav="schedule">スケジュール</a>
+        <a href="/staff/#office" data-nav="office">事務所用の入力ページ</a>
         <p class="staff-sidebar-group">サイトの修正</p>
-        <a href="/staff/site.html" data-nav="site">Claude Code の会話</a>
+        <a href="/staff/#site" data-nav="site">Claude Code の会話</a>
+        <p class="staff-sidebar-group">設定</p>
+        <a href="/staff/#keys" data-nav="keys">暗号化の鍵</a>
       </nav>
 
     <div class="entry">
@@ -85,15 +91,15 @@
 
   <footer class="site-footer">
     <div class="container">
-      <p class="footer-staff"><a href="/staff/forms.html?kind=office">事務所用の入力ページの一覧に戻る</a></p>
+      <p class="footer-staff"><a href="/staff/">事務所内ページに戻る</a></p>
       <p><small>&copy; 蒲田和紀税理士事務所</small></p>
     </div>
   </footer>
 
 
-  <script src="/form/crypto.js?v=20261009-4"></script>
-  <script src="/form/render.js?v=20261009-4"></script>
-  <script src="/form/values.js?v=20261009-4"></script>
-  <script src="/form/form.js?v=20261009-4"></script>
+  <script src="/form/crypto.js?v=20261009-5"></script>
+  <script src="/form/render.js?v=20261009-5"></script>
+  <script src="/form/values.js?v=20261009-5"></script>
+  <script src="/form/form.js?v=20261009-5"></script>
 </body>
 </html>

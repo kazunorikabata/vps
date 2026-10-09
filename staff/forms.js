@@ -1,56 +1,58 @@
 // 事務所内ページ：入力ページの作成・顧問先へのURLの発行・届いた入力内容の確認と書き出し
 // 暗号化した入力内容は、このページに読み込んだ秘密鍵で、このブラウザの中だけで復号する
 // 入力ページの作成画面は form-editor.js、部品の表示は /form/render.js（顧問先の画面と共通）
-// 顧問先用（URL を発行して顧問先が入力）と事務所用（?kind=office。職員が事務所内ページで入力）で同じページを使う
-// 顧客台帳（?kind=register）も同じページで扱う。台帳の画面は register.js
-const formKind = ['office', 'register'].includes(new URLSearchParams(location.search).get('kind'))
-  ? new URLSearchParams(location.search).get('kind') : 'client';
-const staff = document.querySelector('.staff');
-const message = document.getElementById('message');
-
-let forms = [];
-let registeredKey = null;   // サーバーに登録されている公開鍵 { fingerprint, set }
+// 種類（formKind）ごとに同じ画面を使い、app.js が setKind で切り替える：
+//   client（顧問先用：URL を発行して顧問先が入力）・activity（応対履歴：事務所用で顧問先を選ぶもの）・
+//   office（事務所用：報告書など）・register（顧客台帳。台帳の画面は register.js）
+let formKind = 'client';
+let allForms = [];          // サーバーから受け取ったすべての入力ページ
+let forms = [];             // 今の種類の入力ページ
+let registeredKey = null;   // サーバーに登録されている公開鍵 { fingerprint, set, spki }
 let loadedKey = null;       // このページに読み込んだ秘密鍵 { privateKey, fingerprint }
 let pendingKey = null;      // 作ったばかりで、まだ登録していない鍵
 let current = null;         // 依頼URL・入力内容を表示している入力ページ
 let submissions = [];
 
-showKind();
-// 鍵の開け方の一覧（unlock.js）も続けて読み込む（同時に動かすと、ボタンの使える・使えないが乱れるため）。
-// unlock.js などほかのプログラムを読み終えてから始める
-document.addEventListener('DOMContentLoaded', () => run(async () => {
-  await loadForms();
-  await loadUnlocks();
-  if (formKind === 'register') startRegister();
-}));
+const KIND_TITLES = { client: '顧問先用の入力ページ', activity: '応対履歴', office: '事務所用の入力ページ', register: '顧客台帳' };
+
+// 入力ページがどの種類か（応対履歴は、事務所用で「顧問先を選ぶ」もの）
+function kindOf(form) {
+  const kind = form.kind || 'client';
+  return kind === 'office' && form.clientSelect ? 'activity' : kind;
+}
+
+// 種類を切り替える（arg は顧客台帳で開く顧問先の番号など）
+function setKind(kind, arg) {
+  formKind = kind;
+  for (const id of ['editor', 'requests', 'submissions', 'register', 'activities']) document.getElementById(id).hidden = true;
+  showKind();
+  renderForms();
+  if (kind === 'register') startRegister(arg);
+  if (kind === 'activity') startActivities();
+}
 
 function showKind() {
-  const office = formKind === 'office';
-  const titles = { client: '顧問先用の入力ページ', office: '事務所用の入力ページ', register: '顧客台帳' };
-  const title = titles[formKind];
-  document.title = `${title}｜蒲田和紀税理士事務所`;
-  document.getElementById('page-title').textContent = title;
-  const current = document.querySelector(`.staff-sidebar [data-nav="${formKind === 'client' ? 'forms' : formKind}"]`);
-  current.classList.add('is-current');
-  current.setAttribute('aria-current', 'page');
+  const staffOnly = formKind === 'office' || formKind === 'activity';
+  document.getElementById('page-title').textContent = KIND_TITLES[formKind];
   document.getElementById('kind-note').textContent = {
-    office: '報告書など、職員が外出先などからこのページで入力するためのページです。「入力する」から入力します。入力した内容はドライブの「事務所の記録」フォルダの、入力ページごとのスプレッドシートに1件1行で保存され、入力した職員のIDも残ります。',
+    office: '日報・報告書など、顧問先に関係しない記録を職員が入力するためのページです。「入力する」から入力します（スマホからも使えます）。入力した内容はドライブの「事務所の記録」フォルダの、入力ページごとのスプレッドシートに1件1行で保存され、入力した職員のIDも残ります。',
+    activity: '電話・訪問・相談などの応対を記録する入力ページです。入力のときに顧問先を選び、顧客台帳と上の一覧に、顧問先ごとに新しい順で並びます。「入力する」から入力します（スマホからも使えます）。',
     client: '顧問先に入力してもらうページです。「依頼URL」で顧問先ごとのURLを発行します。届いた内容はドライブの「入力内容」フォルダの、入力ページごとのスプレッドシートに1件1行で保存されます（添付ファイルは顧問先のフォルダに入ります）。',
-    register: '顧問先ごとの情報（台帳）です。項目は「新しい台帳を作る」・「編集」で自由に作れます。「台帳を開く」で顧問先の一覧を見て、開いて直せます。直すたびにドライブの「顧客台帳」フォルダのスプレッドシートに1行足され（暗号化したまま）、前の内容は履歴として残ります。見る・直すには、上の「暗号化の鍵」で鍵を開いてください。',
+    register: '顧問先ごとの情報（台帳）です。項目は「新しい台帳を作る」・「編集」で自由に作れます。「台帳を開く」で顧問先の一覧を見て、開いて直せます。直すたびにドライブの「顧客台帳」フォルダのスプレッドシートに1行足され（暗号化したまま）、前の内容は履歴として残ります。見る・直すには、上の欄で鍵を開いてください。',
   }[formKind];
   document.getElementById('new-form').textContent = formKind === 'register' ? '新しい台帳を作る' : '新しい入力ページを作る';
   document.getElementById('forms-count-head').textContent = formKind === 'client' ? '依頼' : '';
-  document.getElementById('sub-who-head').textContent = office ? '入力した職員' : '顧問先';
-  // 事務所用は顧問先ごとに分けないので、「最新の1件だけ」は使わない
-  document.getElementById('sub-latest').checked = !office;
-  document.getElementById('sub-latest-line').hidden = office;
+  document.getElementById('sub-who-head').textContent = staffOnly ? '入力した職員' : '顧問先';
+  // 事務所用・応対履歴は「顧問先ごとに最新の1件だけ」は使わない
+  document.getElementById('sub-latest').checked = !staffOnly;
+  document.getElementById('sub-latest-line').hidden = staffOnly;
 }
 
-// 届いた内容を誰が送ったか（顧問先用は顧問先の番号、事務所用は入力した職員）
+// 届いた内容を誰が送ったか（顧問先用は顧問先の番号、事務所用は入力した職員、応対履歴は「顧問先・職員」）
 function senderOf(item) {
-  if (formKind !== 'office') return item.code;
-  // 顧問先を選ぶ事務所用は「顧問先・職員」
-  return item.code && item.code !== '事務所' ? `${item.code}・${item.staff || '-'}` : (item.staff || '-');
+  if (formKind === 'activity') return `${item.code}・${item.staff || '-'}`;
+  if (formKind === 'office') return item.staff || '-';
+  return item.code;
 }
 
 // --- 暗号化の鍵 ---
@@ -152,16 +154,21 @@ function showKey() {
     loaded.className = 'key-loaded is-ok';
   }
   // 顧客台帳を開いていれば、鍵が開いたところで中身を読み込む（register.js）
-  if (formKind === 'register' && loadedKey) registerKeyChanged();
+  if (loadedKey && formKind === 'register') registerKeyChanged();
 }
 
 // --- 入力ページの一覧 ---
 
 async function loadForms() {
   const data = await api('forms/list');
-  forms = data.forms.filter((f) => (f.kind || 'client') === formKind);
+  allForms = data.forms;
   registeredKey = data.key;
   showKey();
+  renderForms();
+}
+
+function renderForms() {
+  forms = allForms.filter((f) => kindOf(f) === formKind);
   const tbody = document.getElementById('forms');
   tbody.replaceChildren(...forms.map(formRow));
   document.getElementById('forms-empty').hidden = forms.length > 0;
@@ -182,8 +189,8 @@ function formRow(form) {
 
 function showFormOps(td, form) {
   const first = {
-    office: () => [button('入力する', () => { location.href = `/staff/entry.html#${form.id}`; }),
-      button('届いた内容', () => run(() => openSubmissions(form)))],
+    office: () => [button('入力する', () => openEntry(form.id)), button('届いた内容', () => run(() => openSubmissions(form)))],
+    activity: () => [button('入力する', () => openEntry(form.id)), button('届いた内容', () => run(() => openSubmissions(form)))],
     client: () => [button('依頼URL', () => run(() => openRequests(form))),
       button('届いた内容', () => run(() => openSubmissions(form)))],
     register: () => [button('台帳を開く', () => run(() => openRegister(form)))],
@@ -196,10 +203,16 @@ function showFormOps(td, form) {
       '削除する', async () => {
         await api('forms/remove', { id: form.id });
         showMessage(`「${form.title}」を削除しました`, 'ok');
-        for (const id of ['editor', 'requests', 'submissions', 'register']) document.getElementById(id).hidden = true;
+        for (const id of ['editor', 'requests', 'submissions', 'register', 'activities']) document.getElementById(id).hidden = true;
         await loadForms();
       }, () => showFormOps(td, form)), 'button-danger'),
   );
+}
+
+// 事務所用・応対履歴の入力画面は別のタブで開く（このページの鍵を開いたままにしておくため）
+function openEntry(formId, code) {
+  const query = code ? `?code=${encodeURIComponent(code)}` : '';
+  window.open(`/staff/entry.html${query}#${formId}`, '_blank', 'noopener');
 }
 
 // --- 顧問先への依頼URL ---
@@ -482,126 +495,4 @@ function csvCell(value) {
   let v = String(value);
   if (/^[=+@\t\r]/.test(v) || (/^-/.test(v) && !/^-[\d,.]+$/.test(v))) v = `'${v}`;
   return `"${v.replace(/"/g, '""')}"`;
-}
-
-// --- 共通 ---
-
-function cell(content) {
-  const td = document.createElement('td');
-  td.append(content);
-  return td;
-}
-
-function input(value, placeholder, maxLength) {
-  const el = document.createElement('input');
-  el.value = value;
-  el.placeholder = placeholder;
-  el.maxLength = maxLength;
-  el.setAttribute('aria-label', placeholder);
-  return el;
-}
-
-function select(options, value, label) {
-  const el = document.createElement('select');
-  for (const [v, text] of Object.entries(options)) el.append(new Option(text, v));
-  el.value = value;
-  el.setAttribute('aria-label', label);
-  return el;
-}
-
-function checkLine(text, checked, onChange) {
-  const label = document.createElement('label');
-  label.className = 'check-line';
-  const box = document.createElement('input');
-  box.type = 'checkbox';
-  box.checked = checked;
-  box.addEventListener('change', () => onChange(box.checked));
-  label.append(box, text);
-  return label;
-}
-
-function button(label, onClick, extraClass = '') {
-  const b = document.createElement('button');
-  b.type = 'button';
-  b.className = `button button-small ${extraClass}`.trim();
-  b.textContent = label;
-  b.addEventListener('click', onClick);
-  return b;
-}
-
-// 確認のダイアログは使えないので、操作欄の中で確認する
-function askConfirm(td, text, label, action, cancel) {
-  const note = document.createElement('p');
-  note.className = 'confirm-text';
-  note.textContent = text;
-  td.replaceChildren(note, button(label, () => run(action), 'button-danger'), button('やめる', cancel, 'button-outline'));
-}
-
-// パソコンの時刻の設定によらず、日本時間で表示する
-function formatDate(iso) {
-  const t = new Date(iso).getTime();
-  if (Number.isNaN(t)) return iso || '';
-  const d = new Date(t + 9 * 3600 * 1000);
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
-}
-
-function today() {
-  return formatDate(new Date().toISOString()).slice(0, 10).replace(/-/g, '');
-}
-
-// 処理の間はボタンを押せなくする。処理の中から別の処理を始めても、全部終わったところで元に戻す
-let busyDepth = 0;
-
-async function run(task) {
-  if (busyDepth++ === 0) setBusy(true);
-  try {
-    await task();
-  } catch (err) {
-    showMessage(err.message, 'error');
-  } finally {
-    if (--busyDepth === 0) setBusy(false);
-  }
-}
-
-function setBusy(busy) {
-  staff.classList.toggle('is-busy', busy);
-  // 終わったら元の状態に戻す（処理中に作られたボタンはそのまま）
-  for (const b of staff.querySelectorAll('button')) {
-    if (busy) {
-      b.dataset.wasDisabled = b.disabled ? '1' : '';
-      b.disabled = true;
-    } else if (b.dataset.wasDisabled !== undefined) {
-      b.disabled = b.dataset.wasDisabled === '1';
-      delete b.dataset.wasDisabled;
-    }
-  }
-}
-
-function showMessage(text, kind) {
-  message.textContent = text;
-  message.className = `staff-message is-${kind}`;
-  message.hidden = false;
-  // ページの下の方で操作したときも、エラーに気づけるようにする
-  if (kind === 'error') message.scrollIntoView({ behavior: 'smooth', block: 'center' });
-}
-
-function api(path, body = {}) {
-  return fetchJson(`/api/staff/${path}`, body);
-}
-
-async function fetchJson(url, body = {}) {
-  let res;
-  try {
-    res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-  } catch {
-    throw new Error('通信できませんでした。時間をおいて再度お試しください');
-  }
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `エラーが起きました（${res.status}）`);
-  return data;
 }

@@ -1081,8 +1081,9 @@ def handle_register_history(body):
 
 
 def handle_register_activities(body):
-    """1社の対応の記録（顧問先を選ぶ事務所用の入力ページに送られたもの）。新しい順。中身は submissions/get で開く"""
-    code = check_code(body.get("code"))
+    """応対履歴（顧問先を選ぶ事務所用の入力ページに送られたもの）。code があればその顧問先だけ。新しい順。
+    中身は submissions/get で開く"""
+    code = check_code(body["code"]) if body.get("code") is not None else None
     forms = load_json(FORMS_FILE)
     sheets = load_json(SHEETS_FILE)
     targets = [(fid, f) for fid, f in forms.items() if f.get("kind") == "office" and f.get("clientSelect")]
@@ -1093,8 +1094,9 @@ def handle_register_activities(body):
             continue
         for row in sheets_values(info["id"], MAIN_SHEET, "A2:D"):
             row = row + [""] * (4 - len(row))
-            if ROW_ID_RE.match(row[0]) and row[2] == code:
-                items.append({"formId": fid, "formTitle": form["title"], "id": row[0], "submitted": row[1], "staff": row[3]})
+            if ROW_ID_RE.match(row[0]) and row[2] != OFFICE_CODE and (code is None or row[2] == code):
+                items.append({"formId": fid, "formTitle": form["title"], "id": row[0], "submitted": row[1],
+                              "code": row[2], "staff": row[3]})
     items.sort(key=lambda x: parse_time(x["submitted"]), reverse=True)
     return {"activities": items, "forms": [{"id": fid, "title": f["title"]} for fid, f in targets]}
 
@@ -1530,6 +1532,7 @@ STAFF_ROUTES = {
     "/register/records": handle_register_records,
     "/register/history": handle_register_history,
     "/register/activities": handle_register_activities,
+    "/activities/list": handle_register_activities,
     "/office/get": handle_office_get,
     "/office/submit": handle_office_submit,
     "/office/file-session": handle_office_file_session,
@@ -1541,7 +1544,7 @@ STAFF_ROUTES = {
 # 見るだけの API（変更の記録を残さない）
 STAFF_READ_ONLY = {"/clients/list", "/clients/qr", "/forms/list", "/requests/list", "/requests/qr",
                    "/submissions/list", "/office/get", "/unlocks/list", "/register/records", "/register/history",
-                   "/register/activities"}
+                   "/register/activities", "/activities/list"}
 
 
 class Handler(BaseHTTPRequestHandler):

@@ -1,6 +1,5 @@
-// 事務所内ページ：顧問先の追加・削除・URLの再発行・QRコード
-const staff = document.querySelector('.staff');
-const message = document.getElementById('message');
+// 事務所内ページ：顧問先の一覧（追加・削除・URLの再発行・QRコード・台帳へ）
+// common.js の共通の部品（run・api・button・askConfirm・showMessage）を使う。一覧の読み込み（loadClients）は app.js が呼ぶ
 const addForm = document.getElementById('add-form');
 const codeInput = document.getElementById('code');
 const tbody = document.getElementById('clients');
@@ -15,7 +14,7 @@ addForm.addEventListener('submit', (event) => {
   event.preventDefault();
   const code = codeInput.value.trim();
   run(async () => {
-    const { client } = await api('add', { code });
+    const { client } = await api('clients/add', { code });
     codeInput.value = '';
     showMessage(`${code} を追加しました。ドライブに「${code}」フォルダを作りました`, 'ok');
     await loadClients();
@@ -37,10 +36,8 @@ document.getElementById('detail-close').addEventListener('click', () => {
   detail.hidden = true;
 });
 
-run(loadClients);
-
 async function loadClients() {
-  const { clients } = await api('list');
+  const { clients } = await api('clients/list');
   tbody.innerHTML = '';
   for (const client of clients) tbody.append(createRow(client));
   empty.hidden = clients.length > 0;
@@ -69,90 +66,31 @@ function createRow(client) {
 function showOps(td, client) {
   td.replaceChildren(
     button('URL・QR', () => run(() => showDetail(client, `${client.code} のアップロード用URL`))),
-    button('台帳', () => { location.href = `/staff/forms.html?kind=register&code=${encodeURIComponent(client.code)}`; }, 'button-outline'),
-    button('再発行', () => askConfirm(td, client,
+    button('台帳・応対履歴', () => { location.hash = `#register/${encodeURIComponent(client.code)}`; }, 'button-outline'),
+    button('再発行', () => askConfirm(td,
       `${client.code} のURLを新しくしますか？ 今のURLとQRコードは使えなくなります。`, '再発行する', async () => {
-        const { client: renewed } = await api('reissue', { code: client.code });
+        const { client: renewed } = await api('clients/reissue', { code: client.code });
         showMessage(`${client.code} のURLを再発行しました。新しいURLを顧問先にお知らせください`, 'ok');
         await loadClients();
         await showDetail(renewed, `${client.code} の新しいアップロード用URL`);
-      })),
-    button('削除', () => askConfirm(td, client,
+      }, () => showOps(td, client))),
+    button('削除', () => askConfirm(td,
       `${client.code} を削除しますか？ URLは使えなくなります（ドライブのフォルダと資料は残ります）。`, '削除する', async () => {
-        await api('remove', { code: client.code });
+        await api('clients/remove', { code: client.code });
         showMessage(`${client.code} を削除しました`, 'ok');
         if (detailTitle.textContent.startsWith(`${client.code} `)) detail.hidden = true;
         await loadClients();
-      }), 'button-danger'),
-  );
-}
-
-// 確認のダイアログは使えないので、操作欄の中で確認する
-function askConfirm(td, client, text, label, action) {
-  const note = document.createElement('p');
-  note.className = 'confirm-text';
-  note.textContent = text;
-  td.replaceChildren(
-    note,
-    button(label, () => run(action), 'button-danger'),
-    button('やめる', () => showOps(td, client), 'button-outline'),
+      }, () => showOps(td, client)), 'button-danger'),
   );
 }
 
 async function showDetail(client, title) {
   detailTitle.textContent = title;
   detailUrl.value = client.uploadUrl;
-  const { dataUrl } = await api('qr', { code: client.code });
+  const { dataUrl } = await api('clients/qr', { code: client.code });
   detailQr.src = dataUrl;
   detailQrSave.href = dataUrl;
   detailQrSave.download = `${client.code}_QRコード.png`;
   detail.hidden = false;
   detail.scrollIntoView({ behavior: 'smooth', block: 'start' });
-}
-
-function button(label, onClick, extraClass = '') {
-  const b = document.createElement('button');
-  b.type = 'button';
-  b.className = `button button-small ${extraClass}`.trim();
-  b.textContent = label;
-  b.addEventListener('click', onClick);
-  return b;
-}
-
-async function run(task) {
-  setBusy(true);
-  try {
-    await task();
-  } catch (err) {
-    showMessage(err.message, 'error');
-  } finally {
-    setBusy(false);
-  }
-}
-
-function setBusy(busy) {
-  staff.classList.toggle('is-busy', busy);
-  for (const b of staff.querySelectorAll('button')) b.disabled = busy;
-}
-
-function showMessage(text, kind) {
-  message.textContent = text;
-  message.className = `staff-message is-${kind}`;
-  message.hidden = false;
-}
-
-async function api(path, body = {}) {
-  let res;
-  try {
-    res = await fetch(`/api/staff/clients/${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-  } catch {
-    throw new Error('通信できませんでした。時間をおいて再度お試しください');
-  }
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `エラーが起きました（${res.status}）`);
-  return data;
 }

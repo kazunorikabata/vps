@@ -5,14 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <meta name="referrer" content="no-referrer">
-  <title>顧問先の登録・URL｜蒲田和紀税理士事務所</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; form-action 'none'; base-uri 'none'; object-src 'none'">
+  <title>事務所内｜蒲田和紀税理士事務所</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&family=Noto+Serif+JP:wght@500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
-  <link rel="stylesheet" href="/staff/staff.css?v=20261008-11">
+  <link rel="stylesheet" href="/staff/staff.css?v=20261009-5">
+  <link rel="stylesheet" href="/form/layout.css?v=20261009-5">
+  <link rel="stylesheet" href="/staff/forms.css?v=20261009-5">
 </head>
 <body>
+  <!-- 事務所内ページは、この1つのページで画面を切り替える（app.js）。鍵はこのページの中だけに置くので、
+       画面を切り替えても開いたまま使える（ページを閉じるか再読み込みすると消える） -->
   <header class="site-header">
     <div class="container header-inner">
       <a href="/staff/" class="logo">蒲田和紀税理士事務所</a>
@@ -27,20 +32,46 @@
     <div class="container staff-layout">
       <nav class="staff-sidebar" aria-label="事務所内のメニュー">
         <p class="staff-sidebar-group">顧問先の管理</p>
-        <a href="/staff/" data-nav="clients" class="is-current" aria-current="page">顧問先の登録・URL</a>
-        <a href="/staff/forms.html" data-nav="forms">顧問先用の入力ページ</a>
-        <a href="/staff/forms.html?kind=register" data-nav="register">顧客台帳</a>
+        <a href="#clients" data-nav="clients">顧問先の一覧</a>
+        <a href="#activity" data-nav="activity">応対履歴</a>
+        <a href="#forms" data-nav="forms">顧問先用の入力ページ</a>
+        <a href="#register" data-nav="register">顧客台帳</a>
         <p class="staff-sidebar-group">事務所の管理</p>
-        <a href="/staff/forms.html?kind=office" data-nav="office">事務所用の入力ページ</a>
+        <a href="#todo" data-nav="todo">TODO</a>
+        <a href="#deadline" data-nav="deadline">期限の管理</a>
+        <a href="#schedule" data-nav="schedule">スケジュール</a>
+        <a href="#office" data-nav="office">事務所用の入力ページ</a>
         <p class="staff-sidebar-group">サイトの修正</p>
-        <a href="/staff/site.html" data-nav="site">Claude Code の会話</a>
+        <a href="#site" data-nav="site">Claude Code の会話</a>
+        <p class="staff-sidebar-group">設定</p>
+        <a href="#keys" data-nav="keys">暗号化の鍵</a>
       </nav>
 
-    <div class="staff">
-      <h1 class="section-title">顧問先の登録・URL</h1>
-
+    <div class="staff staff-wide">
       <p id="message" class="staff-message" role="status" hidden></p>
 
+      <!-- 暗号化の鍵を開く欄（どの画面でも上に出す。鍵の作成・開け方の登録は「暗号化の鍵」の画面） -->
+      <section class="keybar" aria-label="暗号化の鍵">
+        <p id="key-loaded" class="key-loaded"></p>
+        <form id="unlock-open" class="unlock-open" hidden>
+          <label>パスワード <input type="password" id="unlock-pass" required autocomplete="off"></label>
+          <button type="submit" class="button">キー・iPhoneで鍵を開く</button>
+          <p class="hint">PC は Chrome か Edge でセキュリティキーを差して触れてください。iPhone は Safari で Face ID を使います。</p>
+        </form>
+        <div class="key-actions">
+          <button type="button" id="key-open-show" class="button button-outline button-small">鍵のファイルで開く（予備）</button>
+          <a href="#keys" class="button button-outline button-small">鍵の設定</a>
+        </div>
+        <form id="key-open" class="key-form" hidden>
+          <label>鍵のファイル <input type="file" id="key-open-file" accept=".json,application/json" required></label>
+          <label>パスワード <input type="password" id="key-open-pass" required autocomplete="off"></label>
+          <button type="submit" class="button">読み込む</button>
+          <p class="hint">読み込んだ鍵は、このページを閉じるか再読み込みすると消えます（ブラウザには保存しません）。</p>
+        </form>
+      </section>
+
+      <div class="view" data-view="clients" hidden>
+        <h1 class="section-title">顧問先の一覧</h1>
       <section class="staff-card">
         <h2>顧問先を追加</h2>
         <form id="add-form" class="add-form">
@@ -78,7 +109,278 @@
         </div>
         <p id="empty" class="hint" hidden>まだ登録されていません。</p>
       </section>
+      </div>
 
+      <!-- 入力ページ（顧問先用・応対履歴・事務所用・顧客台帳）は同じ画面で、種類だけ切り替える（forms.js） -->
+      <div class="view" data-view="forms" hidden>
+        <h1 id="page-title" class="section-title">顧問先用の入力ページ</h1>
+
+        <!-- 応対履歴：全顧問先の応対を新しい順に（activities.js） -->
+        <section id="activities" class="staff-card" hidden>
+          <h2>応対履歴の一覧</h2>
+          <div class="register-toolbar">
+            <label class="activities-filter">顧問先 <select id="activities-code"><option value="">すべて</option></select></label>
+          </div>
+          <ul id="activities-list" class="register-history"></ul>
+          <p id="activities-empty" class="hint" hidden>まだ記録がありません。</p>
+          <div id="activities-view" class="sub-view" hidden></div>
+        </section>
+
+      <!-- 入力ページの一覧 -->
+      <section class="staff-card">
+        <h2>入力ページ</h2>
+        <p id="kind-note" class="hint kind-note"></p>
+        <button type="button" id="new-form" class="button">新しい入力ページを作る</button>
+        <div class="table-wrap">
+          <table class="clients-table">
+            <thead>
+              <tr><th>名前</th><th>暗号化</th><th>項目</th><th id="forms-count-head">依頼</th><th>更新</th><th>操作</th></tr>
+            </thead>
+            <tbody id="forms"></tbody>
+          </table>
+        </div>
+        <p id="forms-empty" class="hint" hidden>まだ入力ページがありません。</p>
+      </section>
+
+      <!-- 入力ページの編集 -->
+      <section id="editor" class="staff-card" hidden>
+        <h2 id="editor-title"></h2>
+        <div class="ed-row">
+          <label for="ed-title">名前（入力画面に表示されます）</label>
+          <input id="ed-title" class="ed-input" maxlength="100">
+        </div>
+        <div class="ed-row">
+          <label for="ed-description">説明（任意）</label>
+          <textarea id="ed-description" class="ed-input" rows="3" maxlength="2000"></textarea>
+        </div>
+        <div class="ed-row">
+          <label class="check-line"><input type="checkbox" id="ed-encrypt"> 入力内容を暗号化する（おすすめ）</label>
+          <p id="ed-encrypt-note" class="hint"></p>
+        </div>
+        <div class="ed-row">
+          <label class="check-line"><input type="checkbox" id="ed-pdf-border"> 入力したあとに保存するPDFで、項目を枠で囲む</label>
+          <p class="hint">外すと、項目名と入力内容だけを並べます（表の罫線と「枠」の部品は残ります）。</p>
+        </div>
+        <div class="ed-row">
+          <label for="ed-label-position">項目名の位置</label>
+          <select id="ed-label-position" class="ed-select">
+            <option value="top">上（項目名の下に入力欄）</option>
+            <option value="side">横（左に項目名、右に入力欄）</option>
+          </select>
+        </div>
+        <div class="ed-row">
+          <label for="ed-help-position">説明の位置</label>
+          <select id="ed-help-position" class="ed-select">
+            <option value="above">入力欄の上</option>
+            <option value="inside">入力欄の中（薄い文字。入力を始めると消えます）</option>
+          </select>
+          <p class="hint">部品を選ぶと、右側の設定で項目ごとに変えられます。スマホでは項目名はいつも上になります。日付・選択肢・チェック・表の説明は、いつも入力欄の上に出ます。</p>
+        </div>
+
+        <h3 class="ed-subtitle">レイアウト</h3>
+        <p class="hint">部品を押して選ぶと、右側で設定を変えられます。ドラッグで並べ替えや枠への出し入れ、右端のつまみを左右に動かすと幅（横12マスのうち何マス使うか）を変えられます。スマホでは自動で縦1列になります。「ページ区切り」を置くと、顧問先の画面は「次へ」で1ページずつ進み、PDFもそこで改ページします。</p>
+        <div id="ed-palette" class="ed-palette"></div>
+        <div class="ed-workspace">
+          <div class="ed-canvas-wrap">
+            <div id="ed-canvas" class="ed-canvas"></div>
+            <p id="ed-canvas-empty" class="hint ed-canvas-empty">上のボタンで部品を追加してください。</p>
+          </div>
+          <aside id="ed-props" class="ed-props" aria-label="選んだ部品の設定"></aside>
+        </div>
+
+        <div class="ed-actions">
+          <button type="button" id="ed-save" class="button">保存</button>
+          <button type="button" id="ed-preview" class="button button-outline">プレビュー</button>
+          <button type="button" id="ed-cancel" class="button button-outline">閉じる</button>
+        </div>
+        <p class="hint">プレビューは別のタブで、顧問先が見る入力画面を保存前の状態で開きます。入力や「次へ」、送信後のPDFも試せます（どこにも送信されません）。</p>
+      </section>
+
+      <!-- 顧問先への依頼URL -->
+      <section id="requests" class="staff-card" hidden>
+        <h2 id="requests-title"></h2>
+        <form id="request-form" class="add-form">
+          <label for="request-code">顧問先</label>
+          <select id="request-code" required></select>
+          <button type="submit" class="button">URLを発行</button>
+        </form>
+        <div id="request-detail" hidden>
+          <p class="detail-label" id="request-detail-title"></p>
+          <div class="url-row">
+            <input id="request-url" readonly aria-label="入力ページのURL">
+            <button type="button" id="request-copy" class="button">コピー</button>
+          </div>
+          <div class="qr">
+            <img id="request-qr" alt="入力ページのURLのQRコード">
+            <a id="request-qr-save" class="button button-outline" download>QRコードを保存</a>
+          </div>
+          <p class="hint">URLを知っている人は、誰でもこの顧問先として入力・送信できます。顧問先以外には渡さないでください。</p>
+        </div>
+        <div class="table-wrap">
+          <table class="clients-table">
+            <thead><tr><th>顧問先</th><th>発行日</th><th>操作</th></tr></thead>
+            <tbody id="request-list"></tbody>
+          </table>
+        </div>
+        <p id="requests-empty" class="hint" hidden>まだURLを発行していません。</p>
+        <button type="button" id="requests-close" class="button button-outline">閉じる</button>
+      </section>
+
+      <!-- 届いた入力内容 -->
+      <section id="submissions" class="staff-card" hidden>
+        <h2 id="submissions-title"></h2>
+        <p id="sub-sheet" class="hint" hidden>入力内容は、この入力ページのスプレッドシートに1件1行で入っています（暗号化した入力ページは暗号化されたまま）。
+          <a id="sub-sheet-link" target="_blank" rel="noopener">スプレッドシートを開く</a></p>
+        <div id="sub-migrate" class="sub-migrate" hidden>
+          <p id="sub-migrate-text"></p>
+          <button type="button" id="sub-migrate-run" class="button">スプレッドシートに移す</button>
+        </div>
+        <div class="sub-toolbar">
+          <label id="sub-latest-line" class="check-line"><input type="checkbox" id="sub-latest" checked> 顧問先ごとに最新の1件だけ</label>
+          <button type="button" id="sub-csv" class="button">CSVで書き出す</button>
+        </div>
+        <p class="hint">書き出したCSVは暗号化されていません。事務所のPCの決まった場所に保存し、使い終わったら削除してください。</p>
+        <div class="table-wrap">
+          <table class="clients-table">
+            <thead><tr><th id="sub-who-head">顧問先</th><th>送信日時</th><th>操作</th></tr></thead>
+            <tbody id="sub-list"></tbody>
+          </table>
+        </div>
+        <p id="sub-empty" class="hint" hidden>まだ届いていません。</p>
+        <div id="sub-view" class="sub-view" hidden></div>
+        <button type="button" id="sub-close" class="button button-outline">閉じる</button>
+      </section>
+
+      <!-- 顧客台帳（register.js） -->
+      <section id="register" class="staff-card" hidden>
+        <h2 id="register-title"></h2>
+        <p id="register-locked" class="key-warning">台帳を見るには、このページの上の「暗号化の鍵」で鍵を開いてください。</p>
+        <div id="register-body" hidden>
+          <div class="register-toolbar">
+            <input id="register-search" type="search" placeholder="検索（番号・一覧の項目）" aria-label="台帳を検索">
+            <span class="register-new">
+              <select id="register-new-code" aria-label="台帳を作る顧問先"></select>
+              <button type="button" id="register-new" class="button button-small">この顧問先の台帳を作る</button>
+            </span>
+          </div>
+          <div class="table-wrap">
+            <table class="clients-table">
+              <thead><tr id="register-head"></tr></thead>
+              <tbody id="register-list"></tbody>
+            </table>
+          </div>
+          <p id="register-empty" class="hint" hidden>まだ台帳がありません。上で顧問先を選んで作ってください。</p>
+
+          <div id="register-edit" class="register-edit" hidden>
+            <h3 id="register-edit-title"></h3>
+            <p id="register-client" class="register-client"></p>
+            <div id="register-fields"></div>
+            <div class="ed-actions">
+              <button type="button" id="register-save" class="button">保存</button>
+              <button type="button" id="register-edit-close" class="button button-outline">閉じる</button>
+            </div>
+            <h4 class="register-history-title">対応の記録</h4>
+            <div id="register-activity-new" class="register-activity-new"></div>
+            <ul id="register-activities" class="register-history"></ul>
+            <p id="register-activities-empty" class="hint" hidden>まだ記録がありません。</p>
+            <h4 class="register-history-title">履歴（保存した日時・職員）</h4>
+            <ul id="register-history" class="register-history"></ul>
+            <div id="register-version" class="sub-view" hidden></div>
+          </div>
+        </div>
+        <button type="button" id="register-close" class="button button-outline">閉じる</button>
+      </section>
+      </div>
+
+      <div class="view" data-view="keys" hidden>
+        <h1 class="section-title">暗号化の鍵</h1>
+        <section class="staff-card">
+          <h2>登録済みの鍵</h2>
+          <p id="key-status"></p>
+          <div class="key-actions">
+            <button type="button" id="key-create-show" class="button button-outline">鍵を作る</button>
+          </div>
+        <form id="key-create" class="key-form" hidden>
+          <p id="key-replace-warning" class="key-warning" hidden>
+            作り直すと、これから届く入力内容は新しい鍵でしか開けません。今までの入力内容を開くには、今の鍵のファイルも捨てずに残してください。
+          </p>
+          <label>パスワード（12文字以上） <input type="password" id="key-create-pass" minlength="12" required autocomplete="new-password"></label>
+          <label>パスワード（確認） <input type="password" id="key-create-pass2" minlength="12" required autocomplete="new-password"></label>
+          <button type="submit" class="button">鍵を作る</button>
+          <p class="hint">パスワードと鍵のファイルの両方がないと、入力内容を開けません。パスワードを忘れたり、ファイルをなくしたりすると、事務所でも復元できません。</p>
+        </form>
+
+        <div id="key-save" class="key-form" hidden>
+          <p><strong>鍵ができました。まだ登録していません。</strong></p>
+          <a id="key-save-link" class="button" download>鍵のファイルを保存</a>
+          <label class="check-line"><input type="checkbox" id="key-save-done"> ファイルを保存し、別の場所（USBメモリなど）にも控えを置きました</label>
+          <button type="button" id="key-register" class="button" disabled>この鍵を登録する</button>
+          <p class="hint">鍵のファイルは、入力内容を開く職員の間だけで共有してください。メールやチャットでは送らないでください。</p>
+        </div>
+
+
+        <h3 class="ed-subtitle">鍵の開け方（セキュリティキー・iPhone）</h3>
+        <div class="table-wrap">
+          <table class="clients-table">
+            <thead><tr><th>名前</th><th>種類</th><th>登録日</th><th>操作</th></tr></thead>
+            <tbody id="unlock-list"></tbody>
+          </table>
+        </div>
+        <p id="unlock-empty" class="hint" hidden>まだ登録されていません。登録すると、鍵のファイルを使わずに、キーやiPhoneとパスワードで開けるようになります。</p>
+        <button type="button" id="unlock-add-show" class="button button-outline">開け方を登録する</button>
+
+        <form id="unlock-add" class="key-form" hidden>
+          <label>名前 <input id="unlock-label" maxlength="50" required placeholder="例：セキュリティキー1、所長のiPhone"></label>
+          <label>種類
+            <select id="unlock-kind">
+              <option value="security-key">セキュリティキー（PC の Chrome・Edge で使う）</option>
+              <option value="passkey">この iPhone（Face ID・パスキー）</option>
+            </select>
+          </label>
+          <label>鍵のファイル <input type="file" id="unlock-file" accept=".json,application/json" required></label>
+          <label>鍵のファイルのパスワード <input type="password" id="unlock-file-pass" required autocomplete="off"></label>
+          <label>この開け方で使うパスワード（12文字以上） <input type="password" id="unlock-pass1" minlength="12" required autocomplete="new-password"></label>
+          <label>（確認） <input type="password" id="unlock-pass2" minlength="12" required autocomplete="new-password"></label>
+          <button type="submit" class="button">登録する</button>
+          <p class="hint">登録のときだけ、今の鍵のファイルを使います。iPhone で登録するときは、鍵のファイルを一時的に iPhone に移し、登録が終わったら iPhone から削除してください。登録したキーやiPhoneをなくしたときは、ここで削除してください。</p>
+        </form>
+        </section>
+      </div>
+
+      <div class="view" data-view="todo" hidden>
+        <h1 class="section-title">TODO</h1>
+        <section class="staff-card">
+          <p>準備中です。やること（内容・担当・期日・状態・関係する顧問先）を、暗号化して管理できるようにします。</p>
+        </section>
+      </div>
+
+      <div class="view" data-view="deadline" hidden>
+        <h1 class="section-title">期限の管理</h1>
+        <section class="staff-card">
+          <p>準備中です。申告などの期限を、近い順に一覧できるようにします。</p>
+        </section>
+      </div>
+
+      <div class="view" data-view="schedule" hidden>
+        <h1 class="section-title">スケジュール</h1>
+        <section class="staff-card">
+          <p>準備中です。予定（日時・場所・担当・顧問先）を、月・週で見られるようにします。</p>
+        </section>
+      </div>
+
+      <div class="view" data-view="site" hidden>
+        <h1 class="section-title">サイトの修正</h1>
+      <section class="staff-card">
+        <h2>Claude Code</h2>
+        <p>サイトの修正や公開は、Claude Code のリモートコントロールで行います。代表のアカウントでログインしている端末でのみ使えます。</p>
+        <a href="https://claude.ai/code" class="button" target="_blank" rel="noopener">新しく始める</a>
+
+        <h3 class="sessions-title">会話の一覧</h3>
+        <ul id="claude-sessions" class="session-list"></ul>
+        <p id="claude-empty" class="hint" hidden>会話の記録がありません。</p>
+        <p id="claude-updated" class="hint"></p>
+      </section>
+      </div>
     </div>
     </div>
   </main>
@@ -90,6 +392,17 @@
     </div>
   </footer>
 
-  <script src="/staff/staff.js?v=20261009-4"></script>
+  <script src="/form/crypto.js?v=20261009-5"></script>
+  <script src="/form/render.js?v=20261009-5"></script>
+  <script src="/form/values.js?v=20261009-5"></script>
+  <script src="/staff/common.js?v=20261009-5"></script>
+  <script src="/staff/staff.js?v=20261009-5"></script>
+  <script src="/staff/forms.js?v=20261009-5"></script>
+  <script src="/staff/form-editor.js?v=20261009-5"></script>
+  <script src="/staff/unlock.js?v=20261009-5"></script>
+  <script src="/staff/register.js?v=20261009-5"></script>
+  <script src="/staff/activities.js?v=20261009-5"></script>
+  <script src="/staff/claude.js?v=20261009-5"></script>
+  <script src="/staff/app.js?v=20261009-5"></script>
 </body>
 </html>

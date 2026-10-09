@@ -49,15 +49,17 @@ let draggingId = null;   // ドラッグ中の部品
 // --- 部品の追加ボタン ---
 
 const palette = document.getElementById('ed-palette');
-// 顧客台帳ではファイルの部品は使えない
-const inputTypes = Object.keys(TYPES).filter((t) => !LAYOUT_PALETTE.includes(t) && !(formKind === 'register' && t === 'file'));
-for (const [title, types] of [['入力欄', inputTypes], ['レイアウト', LAYOUT_PALETTE]]) {
+for (const [title, types] of [['入力欄', Object.keys(TYPES).filter((t) => !LAYOUT_PALETTE.includes(t))], ['レイアウト', LAYOUT_PALETTE]]) {
   const row = document.createElement('div');
   row.className = 'ed-palette-row';
   const name = document.createElement('span');
   name.className = 'ed-palette-title';
   name.textContent = title;
-  row.append(name, ...types.map((type) => button(`＋${TYPES[type]}`, () => addField(type), 'button-outline')));
+  row.append(name, ...types.map((type) => {
+    const b = button(`＋${TYPES[type]}`, () => addField(type), 'button-outline');
+    b.dataset.type = type;
+    return b;
+  }));
   palette.append(row);
 }
 
@@ -66,9 +68,6 @@ document.getElementById('ed-cancel').addEventListener('click', () => { editor.hi
 document.getElementById('ed-title').addEventListener('input', (e) => { editing.form.title = e.target.value; });
 document.getElementById('ed-description').addEventListener('input', (e) => { editing.form.description = e.target.value; });
 document.getElementById('ed-pdf-border').addEventListener('change', (e) => { editing.form.pdfBorder = e.target.checked; });
-// 事務所用だけ：入力のときに顧問先を選ぶ
-document.getElementById('ed-client-select-row').hidden = formKind !== 'office';
-document.getElementById('ed-client-select').addEventListener('change', (e) => { editing.form.clientSelect = e.target.checked; });
 // 項目名・説明の位置（入力ページ全体。項目ごとの設定があればそちらが優先）
 for (const key of ['labelPosition', 'helpPosition']) {
   const id = key === 'labelPosition' ? 'ed-label-position' : 'ed-help-position';
@@ -110,21 +109,27 @@ function openEditor(form) {
   editing = form
     ? { id: form.id, form: structuredClone({ title: form.title, description: form.description, encrypt: form.encrypt,
       pdfBorder: form.pdfBorder !== false, labelPosition: form.labelPosition || 'top', helpPosition: form.helpPosition || 'above',
-      kind: formKind, clientSelect: Boolean(form.clientSelect), fields: form.fields }) }
+      ...savedKind(), fields: form.fields }) }
     : { id: null, form: { title: '', description: '', encrypt: true, pdfBorder: true, labelPosition: 'top', helpPosition: 'above',
-      kind: formKind, fields: [] } };
+      ...savedKind(), fields: [] } };
   for (const field of FormRender.iterFields(editing.form.fields)) prepareField(field);
   selectedId = null;
   document.getElementById('editor-title').textContent = form ? `「${form.title}」を編集` : '新しい入力ページ';
   document.getElementById('ed-title').value = editing.form.title;
   document.getElementById('ed-description').value = editing.form.description;
   document.getElementById('ed-pdf-border').checked = editing.form.pdfBorder;
-  document.getElementById('ed-client-select').checked = Boolean(editing.form.clientSelect);
+  // 顧客台帳ではファイルの部品は使えない
+  palette.querySelector('[data-type="file"]').hidden = formKind === 'register';
   document.getElementById('ed-label-position').value = editing.form.labelPosition;
   document.getElementById('ed-help-position').value = editing.form.helpPosition;
   renderAll();
   editor.hidden = false;
   editor.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// 保存するときの種類（応対履歴は、事務所用で「顧問先を選ぶ」もの）
+function savedKind() {
+  return formKind === 'activity' ? { kind: 'office', clientSelect: true } : { kind: formKind, clientSelect: false };
 }
 
 // 種類に必要な設定をそろえる（以前に作った入力ページには幅などがない）

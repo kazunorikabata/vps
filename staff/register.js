@@ -8,6 +8,7 @@ const registerSearch = document.getElementById('register-search');
 let ledger = null;        // 開いている台帳 { form, records: [{ id, code, submitted, staff, versions, answers, error }] }
 let ledgerCode = null;    // 開いている顧問先
 let ledgerControls = [];
+let pendingLedgerCode = null;   // 顧問先の一覧の「開く」から来たときに開く顧問先（#register/番号）
 
 document.getElementById('register-close').addEventListener('click', () => {
   registerCard.hidden = true;
@@ -22,13 +23,12 @@ document.getElementById('register-new').addEventListener('click', () => {
 });
 document.getElementById('register-save').addEventListener('click', () => run(saveLedger));
 
-// 「顧問先の登録・URL」の「台帳」から来たとき（?kind=register&code=…）。台帳が1つならそのまま開く
-function startRegister() {
-  const code = new URLSearchParams(location.search).get('code');
-  if (!code) return;
+// 顧客台帳の画面を開いたとき（code は顧問先の一覧の「開く」から来たときの番号）。台帳が1つならそのまま開く
+function startRegister(code) {
+  pendingLedgerCode = code || null;
   if (forms.length === 1) run(() => openRegister(forms[0]));
-  else if (forms.length > 1) showMessage(`${code} の台帳を開くには、どの台帳かを選んで「台帳を開く」を押してください`, 'ok');
-  else showMessage('まだ台帳がありません。「新しい台帳を作る」で、台帳の項目を作ってください', 'ok');
+  else if (code && forms.length > 1) showMessage(`${code} を開くには、どの台帳かを選んで「台帳を開く」を押してください`, 'ok');
+  else if (code) showMessage('まだ台帳がありません。「新しい台帳を作る」で、台帳の項目を作ってください', 'ok');
 }
 
 async function openRegister(form) {
@@ -69,13 +69,14 @@ async function loadLedger() {
   ledger.records = records;
   // 台帳がまだない顧問先を「作る」の選択肢にする
   const { clients } = await fetchJson('/api/staff/clients/list');
+  ledger.clients = Object.fromEntries(clients.map((c) => [c.code, c]));
   const have = new Set(records.map((r) => r.code));
   document.getElementById('register-new-code').replaceChildren(
     ...clients.filter((c) => !have.has(c.code)).map((c) => new Option(c.code, c.code)));
   renderLedger();
-  const code = new URLSearchParams(location.search).get('code');
-  if (code && !ledger.openedFromUrl) {
-    ledger.openedFromUrl = true;
+  if (pendingLedgerCode) {
+    const code = pendingLedgerCode;
+    pendingLedgerCode = null;
     await openLedgerEdit(code);
   }
 }
@@ -125,6 +126,7 @@ async function openLedgerEdit(code) {
   box.replaceChildren();
   ledgerControls = FormRender.buildForm(box, ledger.form.fields, { layout: ledger.form });
   if (rec) for (const c of ledgerControls) FormValues.fill(c, rec.answers[c.field.id]);
+  showLedgerClient(code);
   document.getElementById('register-version').hidden = true;
   document.getElementById('register-edit').hidden = false;
   // 対応の記録が読み込めなくても、台帳そのものは開けるようにする
@@ -135,6 +137,30 @@ async function openLedgerEdit(code) {
   });
   await loadLedgerHistory();
   document.getElementById('register-edit').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// 顧問先の資料（ドライブのフォルダと、資料アップロードのURL）
+function showLedgerClient(code) {
+  const box = document.getElementById('register-client');
+  const client = ledger.clients && ledger.clients[code];
+  if (!client) {
+    box.replaceChildren();
+    return;
+  }
+  const folder = document.createElement('a');
+  folder.href = client.folderUrl;
+  folder.target = '_blank';
+  folder.rel = 'noopener';
+  folder.textContent = 'ドライブのフォルダを開く';
+  const copy = button('資料アップロードのURLをコピー', async () => {
+    try {
+      await navigator.clipboard.writeText(client.uploadUrl);
+      showMessage(`${code} の資料アップロードのURLをコピーしました`, 'ok');
+    } catch {
+      showMessage('コピーできませんでした。「顧問先の一覧」の「URL・QR」から確かめてください', 'error');
+    }
+  }, 'button-outline');
+  box.replaceChildren(folder, copy);
 }
 
 function closeLedgerEdit() {
@@ -179,7 +205,7 @@ async function loadLedgerActivities() {
   const code = ledgerCode;
   const { activities, forms: targets } = await api('register/activities', { code });
   document.getElementById('register-activity-new').replaceChildren(...targets.map((f) =>
-    button(`＋${f.title}を入力する`, () => { location.href = `/staff/entry.html?code=${encodeURIComponent(code)}#${f.id}`; }, 'button-outline')));
+    button(`＋${f.title}を入力する`, () => openEntry(f.id, code), 'button-outline')));
   document.getElementById('register-activities').replaceChildren(...activities.map((a) => {
     const li = document.createElement('li');
     const span = document.createElement('span');

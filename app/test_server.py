@@ -1020,7 +1020,9 @@ class FormTest(unittest.TestCase):
         self.assertEqual(self.staff_as("/office/submit", {**body, "code": "C002"}, user="sato")[0], 200)
         self.assertEqual(self.staff_as("/office/submit", {"formId": other, "answers": {"name": "x"}, "code": "C001"})[0], 200)
         status, data = self.staff_as("/register/activities", {"code": "C001"})
-        self.assertEqual([(a["formId"], a["staff"]) for a in data["activities"]], [(form_id, "tanaka")])
+        self.assertEqual([(a["formId"], a["code"], a["staff"]) for a in data["activities"]], [(form_id, "C001", "tanaka")])
+        status, data = self.staff_as("/activities/list", {})   # 全顧問先
+        self.assertEqual(sorted(a["code"] for a in data["activities"]), ["C001", "C002"])
         self.assertEqual(data["forms"], [{"id": form_id, "title": "年末調整の確認"}])
         status, data = self.staff("/submissions/get", {"formId": form_id, "id": data["activities"][0]["id"]})
         self.assertEqual((data["record"]["code"], data["record"]["answers"]), ("C001", {"name": "電話"}))
