@@ -11,9 +11,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&family=Noto+Serif+JP:wght@500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
-  <link rel="stylesheet" href="/staff/staff.css?v=20261009-2">
-  <link rel="stylesheet" href="/form/layout.css?v=20261009-2">
-  <link rel="stylesheet" href="/form/form.css?v=20261009-2">
+  <link rel="stylesheet" href="/staff/staff.css?v=20261009-3">
+  <link rel="stylesheet" href="/form/layout.css?v=20261009-3">
+  <link rel="stylesheet" href="/form/form.css?v=20261009-3">
 </head>
 <!-- 事務所用の入力ページ（職員が入力する）。中身は顧問先の入力画面（/form/）と同じ部品と form.js を使う -->
 <body data-mode="office">
@@ -33,6 +33,7 @@
         <p class="staff-sidebar-group">顧問先の管理</p>
         <a href="/staff/" data-nav="clients">顧問先の登録・URL</a>
         <a href="/staff/forms.html" data-nav="forms">顧問先用の入力ページ</a>
+        <a href="/staff/forms.html?kind=register" data-nav="register">顧客台帳</a>
         <p class="staff-sidebar-group">事務所の管理</p>
         <a href="/staff/forms.html?kind=office" data-nav="office" class="is-current">事務所用の入力ページ</a>
         <p class="staff-sidebar-group">サイトの修正</p>
@@ -86,8 +87,9 @@
   </footer>
 
 
-  <script src="/form/crypto.js?v=20261009-2"></script>
-  <script src="/form/render.js?v=20261009-2"></script>
-  <script src="/form/form.js?v=20261009-2"></script>
+  <script src="/form/crypto.js?v=20261009-3"></script>
+  <script src="/form/render.js?v=20261009-3"></script>
+  <script src="/form/values.js?v=20261009-3"></script>
+  <script src="/form/form.js?v=20261009-3"></script>
 </body>
 </html>

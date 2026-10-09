@@ -49,7 +49,9 @@ let draggingId = null;   // ドラッグ中の部品
 // --- 部品の追加ボタン ---
 
 const palette = document.getElementById('ed-palette');
-for (const [title, types] of [['入力欄', Object.keys(TYPES).filter((t) => !LAYOUT_PALETTE.includes(t))], ['レイアウト', LAYOUT_PALETTE]]) {
+// 顧客台帳ではファイルの部品は使えない
+const inputTypes = Object.keys(TYPES).filter((t) => !LAYOUT_PALETTE.includes(t) && !(formKind === 'register' && t === 'file'));
+for (const [title, types] of [['入力欄', inputTypes], ['レイアウト', LAYOUT_PALETTE]]) {
   const row = document.createElement('div');
   row.className = 'ed-palette-row';
   const name = document.createElement('span');
@@ -170,12 +172,14 @@ function hasMyNumber() {
 // マイナンバーやファイルの項目があるときは、暗号化を外せない（ファイルも暗号化して送るため）
 function showEncryptNote() {
   const hasFile = [...FormRender.iterFields(editing.form.fields)].some((f) => f.type === 'file');
-  const forced = hasMyNumber() || hasFile;
+  const register = editing.form.kind === 'register';
+  const forced = hasMyNumber() || hasFile || register;
   if (forced) editing.form.encrypt = true;
   edEncrypt.checked = editing.form.encrypt;
   edEncrypt.disabled = forced;
   const note = document.getElementById('ed-encrypt-note');
-  if (forced) note.textContent = `${hasMyNumber() ? 'マイナンバー' : 'ファイル'}の項目があるため、暗号化は外せません。`;
+  if (register) note.textContent = '顧客台帳は、いつも暗号化します。';
+  else if (forced) note.textContent = `${hasMyNumber() ? 'マイナンバー' : 'ファイル'}の項目があるため、暗号化は外せません。`;
   else if (editing.form.encrypt) note.textContent = '入力内容は事務所の鍵でしか開けません。サーバーやドライブから漏れても読まれません。';
   else note.textContent = '暗号化しない場合、入力内容はドライブにそのまま保存されます。個人情報を含む入力ページでは暗号化してください。';
 }
@@ -264,7 +268,7 @@ function decorate(e, field, list, index) {
 
   const badge = document.createElement('span');
   badge.className = 'ed-badge';
-  badge.textContent = field.type === 'page' ? TYPES.page : `${TYPES[field.type]}・${field.width}${field.newRow ? '・行の頭' : ''}`;
+  badge.textContent = field.type === 'page' ? TYPES.page : `${TYPES[field.type]}・${field.width}${field.newRow ? '・行の頭' : ''}${field.listed ? '・一覧' : ''}`;
   e.prepend(badge);
 
   e.addEventListener('click', (event) => {
@@ -449,6 +453,13 @@ function renderProps() {
 
   if (FormRender.isInput(field)) {
     items.push(checkLine('必須にする', field.required, (checked) => { field.required = checked; renderCanvas(); }));
+    if (editing.form.kind === 'register' && field.type !== 'table') {
+      items.push(checkLine('台帳の一覧に出す（顧問先の一覧の列にする）', Boolean(field.listed), (checked) => {
+        if (checked) field.listed = true;
+        else delete field.listed;
+        renderCanvas();
+      }));
+    }
     items.push(checkLine('項目名を表示しない（CSVの列名とエラーの表示には使います）', Boolean(field.hideLabel), (checked) => {
       if (checked) field.hideLabel = true;
       else delete field.hideLabel;
@@ -541,6 +552,7 @@ function changeType(field, type) {
   if (type !== 'note') delete field.style;
   if (type !== 'checkbox') delete field.checkText;
   if (!FormRender.isInput(field)) delete field.hideLabel;
+  if (!FormRender.isInput(field) || type === 'table') delete field.listed;
   if (type !== 'group') delete field.children;
   if (!FormRender.isInput(field)) field.required = false;
   if (!FormRender.isInput(field) || type === 'table') delete field.labelPosition;

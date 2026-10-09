@@ -11,9 +11,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&family=Noto+Serif+JP:wght@500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
-  <link rel="stylesheet" href="/staff/staff.css?v=20261009-2">
-  <link rel="stylesheet" href="/form/layout.css?v=20261009-2">
-  <link rel="stylesheet" href="/staff/forms.css?v=20261009-2">
+  <link rel="stylesheet" href="/staff/staff.css?v=20261009-3">
+  <link rel="stylesheet" href="/form/layout.css?v=20261009-3">
+  <link rel="stylesheet" href="/staff/forms.css?v=20261009-3">
 </head>
 <body>
   <header class="site-header">
@@ -32,6 +32,7 @@
         <p class="staff-sidebar-group">顧問先の管理</p>
         <a href="/staff/" data-nav="clients">顧問先の登録・URL</a>
         <a href="/staff/forms.html" data-nav="forms">顧問先用の入力ページ</a>
+        <a href="/staff/forms.html?kind=register" data-nav="register">顧客台帳</a>
         <p class="staff-sidebar-group">事務所の管理</p>
         <a href="/staff/forms.html?kind=office" data-nav="office">事務所用の入力ページ</a>
         <p class="staff-sidebar-group">サイトの修正</p>
@@ -238,6 +239,41 @@
         <div id="sub-view" class="sub-view" hidden></div>
         <button type="button" id="sub-close" class="button button-outline">閉じる</button>
       </section>
+
+      <!-- 顧客台帳（register.js） -->
+      <section id="register" class="staff-card" hidden>
+        <h2 id="register-title"></h2>
+        <p id="register-locked" class="key-warning">台帳を見るには、このページの上の「暗号化の鍵」で鍵を開いてください。</p>
+        <div id="register-body" hidden>
+          <div class="register-toolbar">
+            <input id="register-search" type="search" placeholder="検索（番号・一覧の項目）" aria-label="台帳を検索">
+            <span class="register-new">
+              <select id="register-new-code" aria-label="台帳を作る顧問先"></select>
+              <button type="button" id="register-new" class="button button-small">この顧問先の台帳を作る</button>
+            </span>
+          </div>
+          <div class="table-wrap">
+            <table class="clients-table">
+              <thead><tr id="register-head"></tr></thead>
+              <tbody id="register-list"></tbody>
+            </table>
+          </div>
+          <p id="register-empty" class="hint" hidden>まだ台帳がありません。上で顧問先を選んで作ってください。</p>
+
+          <div id="register-edit" class="register-edit" hidden>
+            <h3 id="register-edit-title"></h3>
+            <div id="register-fields"></div>
+            <div class="ed-actions">
+              <button type="button" id="register-save" class="button">保存</button>
+              <button type="button" id="register-edit-close" class="button button-outline">閉じる</button>
+            </div>
+            <h4 class="register-history-title">履歴（保存した日時・職員）</h4>
+            <ul id="register-history" class="register-history"></ul>
+            <div id="register-version" class="sub-view" hidden></div>
+          </div>
+        </div>
+        <button type="button" id="register-close" class="button button-outline">閉じる</button>
+      </section>
     </div>
     </div>
   </main>
@@ -249,10 +285,12 @@
     </div>
   </footer>
 
-  <script src="/form/crypto.js?v=20261009-2"></script>
-  <script src="/form/render.js?v=20261009-2"></script>
-  <script src="/staff/forms.js?v=20261009-2"></script>
-  <script src="/staff/form-editor.js?v=20261009-2"></script>
-  <script src="/staff/unlock.js?v=20261009-2"></script>
+  <script src="/form/crypto.js?v=20261009-3"></script>
+  <script src="/form/render.js?v=20261009-3"></script>
+  <script src="/form/values.js?v=20261009-3"></script>
+  <script src="/staff/forms.js?v=20261009-3"></script>
+  <script src="/staff/form-editor.js?v=20261009-3"></script>
+  <script src="/staff/unlock.js?v=20261009-3"></script>
+  <script src="/staff/register.js?v=20261009-3"></script>
 </body>
 </html>

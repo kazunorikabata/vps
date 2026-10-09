@@ -69,6 +69,7 @@ function createRow(client) {
 function showOps(td, client) {
   td.replaceChildren(
     button('URL・QR', () => run(() => showDetail(client, `${client.code} のアップロード用URL`))),
+    button('台帳', () => { location.href = `/staff/forms.html?kind=register&code=${encodeURIComponent(client.code)}`; }, 'button-outline'),
     button('再発行', () => askConfirm(td, client,
       `${client.code} のURLを新しくしますか？ 今のURLとQRコードは使えなくなります。`, '再発行する', async () => {
         const { client: renewed } = await api('reissue', { code: client.code });

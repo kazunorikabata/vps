@@ -146,6 +146,16 @@
 #request-detail { margin-bottom: 16px; }
 #requests-close, #sub-close { margin-top: 16px; }
 .sub-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+/* 顧客台帳 */
+.register-toolbar { display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; margin-bottom: 12px; }
+.register-toolbar input[type="search"] { flex: 1; min-width: 12em; max-width: 24em; padding: 8px 10px; border: 1px solid var(--line); font-family: inherit; font-size: 0.95rem; }
+.register-new { display: flex; gap: 6px; align-items: center; }
+.register-new select { padding: 6px 8px; border: 1px solid var(--line); font-family: inherit; }
+.register-edit { margin: 20px 0; padding: 16px; border: 2px solid var(--navy); }
+.register-edit h3 { margin: 0 0 12px; font-size: 1.1rem; }
+.register-history-title { margin: 24px 0 8px; font-size: 1rem; }
+.register-history { margin: 0; padding: 0; list-style: none; }
+.register-history li { display: flex; gap: 12px; align-items: center; padding: 6px 0; border-bottom: 1px solid #eee; font-size: 0.9rem; }
 .sub-migrate { margin: 0 0 16px; padding: 12px 16px; border-left: 4px solid var(--accent); background: #f6f2ea; }
 .sub-migrate p { margin: 0 0 8px; }
 .sub-view { margin-top: 20px; padding: 16px; border: 2px solid var(--navy); }

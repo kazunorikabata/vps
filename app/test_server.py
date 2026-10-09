@@ -360,7 +360,7 @@ class FormTest(unittest.TestCase):
         self.dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.dir.cleanup)
         for name in ("CLIENTS_FILE", "FORMS_FILE", "REQUESTS_FILE", "KEY_FILE", "OFFICE_FILE", "UNLOCKS_FILE",
-                     "RECORDS_FILE", "SHEETS_FILE"):
+                     "RECORDS_FILE", "SHEETS_FILE", "REGISTERS_FILE"):
             p = mock.patch.object(server, name, os.path.join(self.dir.name, name.lower()))
             p.start()
             self.addCleanup(p.stop)
@@ -945,6 +945,63 @@ class FormTest(unittest.TestCase):
         row = self.sheets.rows()[5]
         status, data = self.staff("/submissions/get", {"formId": form_id, "id": row[0]})
         self.assertEqual(data["record"]["answers"], {"name": "oldfile0005"})
+
+    # --- 顧客台帳 ---
+
+    def register_form(self):
+        fields = self.form()["fields"]
+        fields[1]["listed"] = True
+        fields[4]["listed"] = True   # 表は一覧に出せない
+        status, data = self.staff("/forms/save", {"form": self.form(kind="register", fields=fields)})
+        self.assertEqual(status, 200, data)
+        self.assertEqual([f.get("listed") for f in data["form"]["fields"]], [None, True, None, None, None])
+        return data["form"]["id"]
+
+    def test_register_kind_rules(self):
+        self.assertEqual(self.staff("/forms/save", {"form": self.form(kind="register", encrypt=False)})[0], 400)
+        self.assertEqual(self.staff("/forms/save", {"form": self.form(kind="register", fields=self.file_form())})[0], 400)
+        form_id = self.register_form()
+        # 台帳には URL を発行できない。顧問先用・事務所用の入口からは使えない
+        self.assertEqual(self.staff("/requests/add", {"formId": form_id, "code": "C001"})[0], 400)
+        self.assertEqual(self.staff_as("/office/get", {"formId": form_id})[0], 404)
+        status, data = self.staff("/forms/save", {"form": self.form()})
+        self.assertEqual(self.staff_as("/register/records", {"formId": data["form"]["id"]})[0], 404)
+
+    def test_register_save_and_history(self):
+        form_id = self.register_form()
+        self.set_key()
+        status, data = self.staff("/forms/list", {})
+        self.assertEqual(data["key"]["spki"], self.SPKI)   # 事務所内ページで暗号化するため
+        enc = self.encrypted()
+        self.assertEqual(self.staff_as("/register/save", {"formId": form_id, "code": "C001", "encrypted": enc})[0], 200)
+        enc2 = {**enc, "data": "WFla" * 10}
+        status, data = self.staff_as("/register/save", {"formId": form_id, "code": "C001", "encrypted": enc2}, user="sato")
+        self.assertEqual(status, 200)
+        latest_id = data["id"]
+        book = next(iter(self.sheets.books.values()))
+        self.assertEqual(book["folder"], "folder-顧客台帳")
+        status, data = self.staff_as("/register/records", {"formId": form_id})
+        self.assertEqual(len(data["records"]), 1)   # 顧問先ごとに、いちばん新しい1件
+        rec = data["records"][0]
+        self.assertEqual((rec["id"], rec["code"], rec["staff"], rec["versions"], rec["encrypted"]["data"]),
+                         (latest_id, "C001", "sato", 2, "WFla" * 10))
+        self.assertEqual(len(data["fields"][rec["fieldsVersion"]]), 5)
+        status, data = self.staff_as("/register/history", {"formId": form_id, "code": "C001"})
+        self.assertEqual(sorted(h["staff"] for h in data["history"]), ["sato", "tanaka"])   # 同じ秒なので順は問わない
+        # 前の版も開ける
+        status, data = self.staff("/submissions/get", {"formId": form_id, "id": data["history"][-1]["id"]})
+        self.assertEqual(status, 200)
+
+    def test_register_save_rejects(self):
+        form_id = self.register_form()
+        self.set_key()
+        good = {"formId": form_id, "code": "C001", "encrypted": self.encrypted()}
+        self.assertEqual(self.staff_as("/register/save", {**good, "code": "C999"})[0], 404)   # 登録していない顧問先
+        self.assertEqual(self.staff_as("/register/save", {**good, "code": "../x"})[0], 400)
+        self.assertEqual(self.staff_as("/register/save", {**good, "encrypted": self.encrypted("0" * 64)})[0], 409)
+        self.assertEqual(self.staff_as("/register/save", {**good, "answers": {"name": "x"}, "encrypted": None})[0], 400)
+        self.assertEqual(self.post("/register/save", good)[0], 404)   # 顧問先用の入口からは使えない
+        self.assertEqual(self.sheets.books, {})
 
     # --- 顧問先の入力ページ ---
 

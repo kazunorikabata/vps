@@ -52,7 +52,7 @@ STAFF_PORT = int(os.environ.get("UPLOAD_STAFF_PORT", "8082"))
 MAX_SIZE = 50 * 1024 * 1024
 MAX_BODY = 4096
 # 既定より大きい本文を受け付ける API（nginx の client_max_body_size もあわせる）
-BODY_LIMITS = {"/form/submit": 256 * 1024, "/office/submit": 256 * 1024, "/unlocks/add": 16 * 1024, "/forms/save": 64 * 1024, "/key/set": 8192}
+BODY_LIMITS = {"/form/submit": 256 * 1024, "/office/submit": 256 * 1024, "/register/save": 256 * 1024, "/unlocks/add": 16 * 1024, "/forms/save": 64 * 1024, "/key/set": 8192}
 MAX_RECORD = 512 * 1024   # 事務所内ページで開く入力内容のファイルの大きさの上限
 RATE_LIMIT = 60      # 1つのURLから1時間に受け付ける件数
 RATE_WINDOW = 3600
@@ -87,7 +87,8 @@ MAX_ENCRYPTED_SIZE = MAX_SIZE + 64
 MAX_FILES = 10
 BATCH_RE = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
 # 入力ページの種類：顧問先用（URL を発行して顧問先が入力）と事務所用（職員が事務所内ページで入力）
-FORM_KINDS = {"client", "office"}
+# register は顧客台帳（顧問先ごとに1件を持ち、直すたびに行を足す。いちばん新しい行が今の内容）
+FORM_KINDS = {"client", "office", "register"}
 OFFICE_NAME = "事務所の記録"
 RECORDS_NAME = "入力内容"
 # 入力内容のスプレッドシート：入力ページごとに1つ。1件1行で、入力内容は暗号化したまま（暗号化しない入力ページは JSON のまま）
@@ -101,6 +102,8 @@ SHEET_HEADER = ["番号", "送信日時", "顧問先", "入力した職員", "�
                 *[f"データ{i}" for i in range(1, MAX_CHUNKS + 1)]]
 ROW_ID_RE = re.compile(r"^R[0-9a-f]{16}$")
 OFFICE_CODE = "事務所"
+REGISTERS_FILE = os.path.join(DATA_DIR, "registers-folder.json")   # 「顧客台帳」フォルダ
+REGISTERS_NAME = "顧客台帳"
 FIELD_ID_RE = re.compile(r"^[a-z0-9_]{1,40}$")
 B64_RE = re.compile(r"^[A-Za-z0-9+/]+={0,2}$")
 
@@ -443,6 +446,16 @@ def office_folder():
     return office["folder_id"]
 
 
+def registers_folder():
+    """「顧客台帳」フォルダのIDを返す。なければ作る"""
+    with _clients_lock:
+        registers = load_json(REGISTERS_FILE)
+        if not registers:
+            registers = {"folder_id": create_folder(REGISTERS_NAME)}
+            save_json(REGISTERS_FILE, registers)
+    return registers["folder_id"]
+
+
 def records_folder():
     """「入力内容」フォルダのIDを返す。なければ作る"""
     with _clients_lock:
@@ -562,6 +575,9 @@ def check_field(f, ids, in_group=False):
     if ftype not in LAYOUT_TYPES and f.get("hideLabel") is True:
         field["hideLabel"] = True
     # 項目ごとの位置の設定（なければ入力ページの設定どおり）
+    # 顧客台帳で、顧問先の一覧に出す項目（表とファイルは出せない）
+    if ftype not in LAYOUT_TYPES and ftype not in ("table", "file") and f.get("listed") is True:
+        field["listed"] = True
     if ftype not in LAYOUT_TYPES and ftype != "table" and f.get("labelPosition") in LABEL_POSITIONS:
         field["labelPosition"] = f["labelPosition"]
     if ftype in PLACEHOLDER_TYPES and f.get("helpPosition") in HELP_POSITIONS:
@@ -679,11 +695,17 @@ def check_form(form):
         raise UploadError(400, "マイナンバーの項目がある入力ページは、暗号化を外せません。")
     if not encrypt and has_file(fields):
         raise UploadError(400, "ファイルの項目がある入力ページは、暗号化を外せません。")
+    kind = form.get("kind") if form.get("kind") in FORM_KINDS else "client"
+    if kind == "register":
+        if not encrypt:
+            raise UploadError(400, "顧客台帳は暗号化を外せません。")
+        if has_file(fields):
+            raise UploadError(400, "顧客台帳ではファイルの部品は使えません。")
     return {
         "title": text(form.get("title"), 100, "入力ページの名前", required=True),
         "description": text(form.get("description", ""), 2000, "説明"),
         "encrypt": encrypt,
-        "kind": form.get("kind") if form.get("kind") in FORM_KINDS else "client",
+        "kind": kind,
         # 顧問先が保存する PDF で、項目を枠で囲むか
         "pdfBorder": form.get("pdfBorder") is not False,
         "labelPosition": form.get("labelPosition") if form.get("labelPosition") in LABEL_POSITIONS else "top",
@@ -745,7 +767,7 @@ def find_request(token):
         raise UploadError(403, "このURLは無効です。事務所にお問い合わせください。")
     req = load_json(REQUESTS_FILE).get(token)
     form = load_json(FORMS_FILE).get(req["form_id"]) if req else None
-    if not form or form.get("kind") == "office":
+    if not form or form.get("kind", "client") != "client":
         raise UploadError(403, "このURLは無効です。事務所にお問い合わせください。")
     return req, form
 
@@ -828,21 +850,25 @@ def handle_form_submit(body):
     return save_submission(req["form_id"], form, req["code"], body, token)
 
 
+def check_encrypted(enc):
+    """ブラウザで事務所の公開鍵を使って暗号化した内容か確かめる"""
+    key = public_key()
+    if not isinstance(enc, dict) or not key:
+        raise UploadError(400, "送信内容の形式が正しくありません。")
+    if enc.get("keyId") != key["fingerprint"]:
+        raise UploadError(409, "ページが古くなっています。ページを読み込み直してから、もう一度入力してください。")
+    return {
+        "keyId": key["fingerprint"],
+        "key": check_b64(enc.get("key"), 2048),
+        "iv": check_b64(enc.get("iv"), 64),
+        "data": check_b64(enc.get("data"), 240 * 1024),
+    }
+
+
 def save_submission(form_id, form, code, body, rate_key, staff=None):
     """入力内容を入力ページのスプレッドシートに保存する（顧問先用・事務所用で共通）。staff は事務所用で入力した職員"""
     if form["encrypt"]:
-        enc = body.get("encrypted")
-        key = public_key()
-        if not isinstance(enc, dict) or not key:
-            raise UploadError(400, "送信内容の形式が正しくありません。")
-        if enc.get("keyId") != key["fingerprint"]:
-            raise UploadError(409, "ページが古くなっています。ページを読み込み直してから、もう一度入力してください。")
-        content = {"encrypted": {
-            "keyId": key["fingerprint"],
-            "key": check_b64(enc.get("key"), 2048),
-            "iv": check_b64(enc.get("iv"), 64),
-            "data": check_b64(enc.get("data"), 240 * 1024),
-        }}
+        content = {"encrypted": check_encrypted(body.get("encrypted"))}
     else:
         content = {"answers": check_answers(form, body.get("answers"))}
     batch = body.get("batch")
@@ -974,6 +1000,76 @@ def handle_office_file_complete(body):
     return file_complete(form_id, office_folder(), OFFICE_CODE, body)
 
 
+# --- 顧客台帳 ---
+# 顧問先ごとに1件。保存するたびにスプレッドシートに行を足し、顧問先ごとにいちばん新しい行を今の内容とする（前の行は履歴）
+
+def find_register(form_id):
+    form = find_form(load_json(FORMS_FILE), form_id)
+    if form.get("kind") != "register":
+        raise UploadError(404, "顧客台帳が見つかりません。")
+    return form
+
+
+def handle_register_save(body):
+    form_id = body.get("formId")
+    form = find_register(form_id)
+    code = check_code(body.get("code"))
+    if not find_folder(code):
+        raise UploadError(404, f"{code} は登録されていません。")
+    record = {
+        "version": 1, "formId": form_id, "formTitle": form["title"], "code": code, "staff": staff_name(body),
+        "submitted": datetime.now(JST).isoformat(timespec="seconds"), "fields": form["fields"],
+        "encrypted": check_encrypted(body.get("encrypted")),
+    }
+    row_id = "R" + secrets.token_hex(8)
+    append_record(form_id, form, row_id, record, None)
+    log.info("register saved form=%s code=%s staff=%s", form_id, code, record["staff"])
+    return {"id": row_id, "submitted": record["submitted"]}
+
+
+def register_rows(form_id):
+    """台帳の行（番号・日時・顧問先・職員・項目の版と暗号化した内容）。古い順"""
+    info = load_json(SHEETS_FILE).get(form_id)
+    if not info:
+        return None, []
+    rows = []
+    for row in sheets_values(info["id"], MAIN_SHEET, "A2:Q"):
+        row = row + [""] * (len(SHEET_HEADER) - len(row))
+        if ROW_ID_RE.match(row[0]):
+            rows.append(row)
+    return info["id"], rows
+
+
+def handle_register_records(body):
+    """顧問先ごとのいちばん新しい内容（暗号化したまま）と、その項目の版"""
+    form_id = body.get("formId")
+    find_register(form_id)
+    sid, rows = register_rows(form_id)
+    latest, counts = {}, {}
+    for row in rows:
+        counts[row[2]] = counts.get(row[2], 0) + 1
+        if row[2] not in latest or parse_time(row[1]) >= parse_time(latest[row[2]][1]):
+            latest[row[2]] = row
+    records, versions = [], {}
+    for code, row in sorted(latest.items()):
+        versions.setdefault(row[5], load_fields(sid, row[5]))
+        records.append({"id": row[0], "code": code, "submitted": row[1], "staff": row[3], "fieldsVersion": row[5],
+                        "versions": counts[code],
+                        "encrypted": {"keyId": row[6], "key": row[7], "iv": row[8], "data": "".join(row[9:])}})
+    return {"records": records, "fields": versions}
+
+
+def handle_register_history(body):
+    """1社の保存の履歴（新しい順）。中身は submissions/get で開く"""
+    form_id = body.get("formId")
+    find_register(form_id)
+    code = check_code(body.get("code"))
+    _, rows = register_rows(form_id)
+    items = [{"id": r[0], "submitted": r[1], "staff": r[3]} for r in rows if r[2] == code]
+    items.sort(key=lambda x: parse_time(x["submitted"]), reverse=True)
+    return {"history": items}
+
+
 def client_view(token, client):
     return {
         "code": client["code"],
@@ -1022,7 +1118,8 @@ def handle_forms_list(body):
     key = public_key()
     return {
         "forms": [form_view(i, f, counts.get(i, 0)) for i, f in items],
-        "key": {"fingerprint": key["fingerprint"], "set": key.get("set", "")} if key else None,
+        # 公開鍵（暗号化に使う。公開してよいもの）も渡す。顧客台帳を保存するときに事務所内ページで暗号化するため
+        "key": {"fingerprint": key["fingerprint"], "set": key.get("set", ""), "spki": key["spki"]} if key else None,
     }
 
 
@@ -1137,8 +1234,8 @@ def handle_requests_add(body):
     """顧問先に入力ページのURLを発行する（同じ顧問先にはすでにあるURLを返す）"""
     code = check_code(body.get("code"))
     with _forms_lock:
-        if find_form(load_json(FORMS_FILE), body.get("formId")).get("kind") == "office":
-            raise UploadError(400, "事務所用の入力ページには、URLを発行できません。")
+        if find_form(load_json(FORMS_FILE), body.get("formId")).get("kind", "client") != "client":
+            raise UploadError(400, "顧問先用の入力ページにだけ、URLを発行できます。")
         if not find_folder(code):
             raise UploadError(404, f"{code} は登録されていません。")
         reqs = load_json(REQUESTS_FILE)
@@ -1184,7 +1281,7 @@ def form_sheet(form_id, form):
         sheets = load_json(SHEETS_FILE)
         info = sheets.get(form_id)
         if not info:
-            folder = office_folder() if form.get("kind") == "office" else records_folder()
+            folder = {"office": office_folder, "register": registers_folder}.get(form.get("kind"), records_folder)()
             info = {"id": sheets_create(folder, f"{RECORDS_NAME}_{form_title_for_name(form)}"), "versions": []}
             sheets[form_id] = info
             save_json(SHEETS_FILE, sheets)
@@ -1400,6 +1497,9 @@ STAFF_ROUTES = {
     "/submissions/remove": handle_submissions_remove,
     "/submissions/file": handle_submissions_file,
     "/submissions/migrate": handle_submissions_migrate,
+    "/register/save": handle_register_save,
+    "/register/records": handle_register_records,
+    "/register/history": handle_register_history,
     "/office/get": handle_office_get,
     "/office/submit": handle_office_submit,
     "/office/file-session": handle_office_file_session,
@@ -1410,7 +1510,7 @@ STAFF_ROUTES = {
 }
 # 見るだけの API（変更の記録を残さない）
 STAFF_READ_ONLY = {"/clients/list", "/clients/qr", "/forms/list", "/requests/list", "/requests/qr",
-                   "/submissions/list", "/office/get", "/unlocks/list"}
+                   "/submissions/list", "/office/get", "/unlocks/list", "/register/records", "/register/history"}
 
 
 class Handler(BaseHTTPRequestHandler):
