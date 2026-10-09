@@ -29,6 +29,11 @@
 .send-button:disabled { background: #9aa5b4; cursor: progress; }
 .send-button.is-outline { background: #fff; box-shadow: inset 0 0 0 2px var(--navy); color: var(--navy); }
 
+/* 事務所用の入力ページで、顧問先を選ぶ欄 */
+.client-select { margin: 0 0 16px; padding: 14px 16px; background: #fff; border: 2px solid var(--navy); }
+.client-select label { display: block; margin: 0 0 6px; font-weight: 700; }
+.client-select select { max-width: 20em; }
+
 /* 事務所の作成画面から開いたプレビュー */
 .preview-note { margin: 0 0 24px; padding: 10px 14px; background: #fbeeed; border-left: 4px solid #b3261e; color: #8c1d18; font-weight: 700; }
 

@@ -66,6 +66,9 @@ document.getElementById('ed-cancel').addEventListener('click', () => { editor.hi
 document.getElementById('ed-title').addEventListener('input', (e) => { editing.form.title = e.target.value; });
 document.getElementById('ed-description').addEventListener('input', (e) => { editing.form.description = e.target.value; });
 document.getElementById('ed-pdf-border').addEventListener('change', (e) => { editing.form.pdfBorder = e.target.checked; });
+// 事務所用だけ：入力のときに顧問先を選ぶ
+document.getElementById('ed-client-select-row').hidden = formKind !== 'office';
+document.getElementById('ed-client-select').addEventListener('change', (e) => { editing.form.clientSelect = e.target.checked; });
 // 項目名・説明の位置（入力ページ全体。項目ごとの設定があればそちらが優先）
 for (const key of ['labelPosition', 'helpPosition']) {
   const id = key === 'labelPosition' ? 'ed-label-position' : 'ed-help-position';
@@ -107,7 +110,7 @@ function openEditor(form) {
   editing = form
     ? { id: form.id, form: structuredClone({ title: form.title, description: form.description, encrypt: form.encrypt,
       pdfBorder: form.pdfBorder !== false, labelPosition: form.labelPosition || 'top', helpPosition: form.helpPosition || 'above',
-      kind: formKind, fields: form.fields }) }
+      kind: formKind, clientSelect: Boolean(form.clientSelect), fields: form.fields }) }
     : { id: null, form: { title: '', description: '', encrypt: true, pdfBorder: true, labelPosition: 'top', helpPosition: 'above',
       kind: formKind, fields: [] } };
   for (const field of FormRender.iterFields(editing.form.fields)) prepareField(field);
@@ -116,6 +119,7 @@ function openEditor(form) {
   document.getElementById('ed-title').value = editing.form.title;
   document.getElementById('ed-description').value = editing.form.description;
   document.getElementById('ed-pdf-border').checked = editing.form.pdfBorder;
+  document.getElementById('ed-client-select').checked = Boolean(editing.form.clientSelect);
   document.getElementById('ed-label-position').value = editing.form.labelPosition;
   document.getElementById('ed-help-position').value = editing.form.helpPosition;
   renderAll();

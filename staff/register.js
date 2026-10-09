@@ -127,6 +127,12 @@ async function openLedgerEdit(code) {
   if (rec) for (const c of ledgerControls) FormValues.fill(c, rec.answers[c.field.id]);
   document.getElementById('register-version').hidden = true;
   document.getElementById('register-edit').hidden = false;
+  // 対応の記録が読み込めなくても、台帳そのものは開けるようにする
+  await loadLedgerActivities().catch(() => {
+    const empty = document.getElementById('register-activities-empty');
+    empty.textContent = '対応の記録を読み込めませんでした。';
+    empty.hidden = false;
+  });
   await loadLedgerHistory();
   document.getElementById('register-edit').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -167,6 +173,48 @@ async function saveLedger() {
   showMessage(`${code} の台帳を保存しました`, 'ok');
 }
 
+// --- 対応の記録（顧問先を選ぶ事務所用の入力ページに送られたもの） ---
+
+async function loadLedgerActivities() {
+  const code = ledgerCode;
+  const { activities, forms: targets } = await api('register/activities', { code });
+  document.getElementById('register-activity-new').replaceChildren(...targets.map((f) =>
+    button(`＋${f.title}を入力する`, () => { location.href = `/staff/entry.html?code=${encodeURIComponent(code)}#${f.id}`; }, 'button-outline')));
+  document.getElementById('register-activities').replaceChildren(...activities.map((a) => {
+    const li = document.createElement('li');
+    const span = document.createElement('span');
+    span.textContent = `${formatDate(a.submitted)}　${a.formTitle}　${a.staff || '-'}`;
+    li.append(span, button('表示', () => run(() => showActivity(a)), 'button-outline'));
+    return li;
+  }));
+  const empty = document.getElementById('register-activities-empty');
+  empty.textContent = 'まだ記録がありません。';
+  empty.hidden = activities.length > 0;
+}
+
+async function showActivity(a) {
+  const { record } = await api('submissions/get', { formId: a.formId, id: a.id });
+  let answers = record.answers;
+  if (record.encrypted) {
+    if (record.encrypted.keyId !== loadedKey.fingerprint) throw new Error('別の鍵で暗号化されています');
+    answers = await FormCrypto.decrypt(loadedKey.privateKey, record.encrypted);
+  }
+  showInPanel(`${formatDate(a.submitted)}　${a.formTitle}（${a.staff || '-'}）`, record.fields, answers, {});
+}
+
+function showInPanel(heading, fields, answers, layout) {
+  const view = document.getElementById('register-version');
+  const title = document.createElement('h3');
+  title.textContent = heading;
+  const grid = document.createElement('div');
+  FormRender.buildView(grid, fields, answers, layout);
+  const close = button('閉じる', () => { view.hidden = true; view.replaceChildren(); }, 'button-outline');
+  close.style.marginTop = '12px';
+  view.replaceChildren(title, grid, close);
+  view.hidden = false;
+  view.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 // --- 履歴（保存した版） ---
 
 async function loadLedgerHistory() {
@@ -190,14 +238,5 @@ async function showLedgerVersion(h) {
   const { record } = await api('submissions/get', { formId: ledger.form.id, id: h.id });
   if (record.encrypted.keyId !== loadedKey.fingerprint) throw new Error('別の鍵で暗号化されています');
   const answers = await FormCrypto.decrypt(loadedKey.privateKey, record.encrypted);
-  const view = document.getElementById('register-version');
-  const title = document.createElement('h3');
-  title.textContent = `${formatDate(h.submitted)}　${h.staff || '-'} が保存した内容`;
-  const grid = document.createElement('div');
-  FormRender.buildView(grid, record.fields, answers, ledger.form);
-  const close = button('閉じる', () => { view.hidden = true; view.replaceChildren(); }, 'button-outline');
-  close.style.marginTop = '12px';
-  view.replaceChildren(title, grid, close);
-  view.hidden = false;
-  view.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  showInPanel(`${formatDate(h.submitted)}　${h.staff || '-'} が保存した内容`, record.fields, answers, ledger.form);
 }

@@ -1003,6 +1003,31 @@ class FormTest(unittest.TestCase):
         self.assertEqual(self.post("/register/save", good)[0], 404)   # 顧問先用の入口からは使えない
         self.assertEqual(self.sheets.books, {})
 
+    def test_office_client_select_and_activities(self):
+        status, data = self.staff("/forms/save", {"form": self.form(kind="office", encrypt=False, clientSelect=True)})
+        self.assertTrue(data["form"]["clientSelect"])
+        form_id = data["form"]["id"]
+        status, data = self.staff("/forms/save", {"form": self.form(clientSelect=True)})
+        self.assertFalse(data["form"]["clientSelect"])   # 顧問先用には付けない
+        other = self.office_form()   # 顧問先を選ばない事務所用
+        with open(server.CLIENTS_FILE, "w", encoding="utf-8") as f:
+            json.dump({TOKEN: {"code": "C001", "folder_id": FOLDER}, "t" * 30: {"code": "C002", "folder_id": "folder2xyz"}}, f)
+        self.assertTrue(self.staff_as("/office/get", {"formId": form_id})[1]["clientSelect"])
+        body = {"formId": form_id, "answers": {"name": "電話"}}
+        self.assertEqual(self.staff_as("/office/submit", body)[0], 400)   # 顧問先を選んでいない
+        self.assertEqual(self.staff_as("/office/submit", {**body, "code": "C999"})[0], 404)
+        self.assertEqual(self.staff_as("/office/submit", {**body, "code": "C001"})[0], 200)
+        self.assertEqual(self.staff_as("/office/submit", {**body, "code": "C002"}, user="sato")[0], 200)
+        self.assertEqual(self.staff_as("/office/submit", {"formId": other, "answers": {"name": "x"}, "code": "C001"})[0], 200)
+        status, data = self.staff_as("/register/activities", {"code": "C001"})
+        self.assertEqual([(a["formId"], a["staff"]) for a in data["activities"]], [(form_id, "tanaka")])
+        self.assertEqual(data["forms"], [{"id": form_id, "title": "年末調整の確認"}])
+        status, data = self.staff("/submissions/get", {"formId": form_id, "id": data["activities"][0]["id"]})
+        self.assertEqual((data["record"]["code"], data["record"]["answers"]), ("C001", {"name": "電話"}))
+        # 顧問先を選ばない事務所用は、今までどおり「事務所」
+        rows = [r for book in self.sheets.books.values() for r in book[server.MAIN_SHEET][1:]]
+        self.assertEqual(sorted(r[2] for r in rows), ["C001", "C002", "事務所"])
+
     # --- 顧問先の入力ページ ---
 
     def test_get_encrypted_form(self):

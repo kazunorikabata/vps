@@ -48,7 +48,9 @@ function showKind() {
 
 // 届いた内容を誰が送ったか（顧問先用は顧問先の番号、事務所用は入力した職員）
 function senderOf(item) {
-  return formKind === 'office' ? (item.staff || '-') : item.code;
+  if (formKind !== 'office') return item.code;
+  // 顧問先を選ぶ事務所用は「顧問先・職員」
+  return item.code && item.code !== '事務所' ? `${item.code}・${item.staff || '-'}` : (item.staff || '-');
 }
 
 // --- 暗号化の鍵 ---

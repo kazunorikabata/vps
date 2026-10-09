@@ -11,9 +11,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&family=Noto+Serif+JP:wght@500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
-  <link rel="stylesheet" href="/staff/staff.css?v=20261009-3">
-  <link rel="stylesheet" href="/form/layout.css?v=20261009-3">
-  <link rel="stylesheet" href="/form/form.css?v=20261009-3">
+  <link rel="stylesheet" href="/staff/staff.css?v=20261009-4">
+  <link rel="stylesheet" href="/form/layout.css?v=20261009-4">
+  <link rel="stylesheet" href="/form/form.css?v=20261009-4">
 </head>
 <!-- 事務所用の入力ページ（職員が入力する）。中身は顧問先の入力画面（/form/）と同じ部品と form.js を使う -->
 <body data-mode="office">
@@ -49,6 +49,10 @@
       <p id="invalid" class="entry-message is-error" hidden></p>
 
       <form id="entry-form" novalidate hidden>
+        <div id="client-select-row" class="client-select" hidden>
+          <label for="client-select">顧問先 <span class="required-mark">必須</span></label>
+          <select id="client-select" class="f-input"></select>
+        </div>
         <p id="description" class="entry-description"></p>
         <p id="secure-note" class="entry-note" hidden>入力内容はこの画面の中で暗号化してから送信します。事務所以外の人は読めません。</p>
         <div id="draft-note" class="draft-note" hidden>
@@ -87,9 +91,9 @@
   </footer>
 
 
-  <script src="/form/crypto.js?v=20261009-3"></script>
-  <script src="/form/render.js?v=20261009-3"></script>
-  <script src="/form/values.js?v=20261009-3"></script>
-  <script src="/form/form.js?v=20261009-3"></script>
+  <script src="/form/crypto.js?v=20261009-4"></script>
+  <script src="/form/render.js?v=20261009-4"></script>
+  <script src="/form/values.js?v=20261009-4"></script>
+  <script src="/form/form.js?v=20261009-4"></script>
 </body>
 </html>

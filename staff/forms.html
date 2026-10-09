@@ -11,9 +11,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&family=Noto+Serif+JP:wght@500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
-  <link rel="stylesheet" href="/staff/staff.css?v=20261009-3">
-  <link rel="stylesheet" href="/form/layout.css?v=20261009-3">
-  <link rel="stylesheet" href="/staff/forms.css?v=20261009-3">
+  <link rel="stylesheet" href="/staff/staff.css?v=20261009-4">
+  <link rel="stylesheet" href="/form/layout.css?v=20261009-4">
+  <link rel="stylesheet" href="/staff/forms.css?v=20261009-4">
 </head>
 <body>
   <header class="site-header">
@@ -146,6 +146,9 @@
           <label class="check-line"><input type="checkbox" id="ed-encrypt"> 入力内容を暗号化する（おすすめ）</label>
           <p id="ed-encrypt-note" class="hint"></p>
         </div>
+        <div id="ed-client-select-row" class="ed-row" hidden>
+          <label class="check-line"><input type="checkbox" id="ed-client-select"> 入力のときに顧問先を選ぶ（顧客台帳の「対応の記録」に出ます）</label>
+        </div>
         <div class="ed-row">
           <label class="check-line"><input type="checkbox" id="ed-pdf-border"> 入力したあとに保存するPDFで、項目を枠で囲む</label>
           <p class="hint">外すと、項目名と入力内容だけを並べます（表の罫線と「枠」の部品は残ります）。</p>
@@ -267,6 +270,10 @@
               <button type="button" id="register-save" class="button">保存</button>
               <button type="button" id="register-edit-close" class="button button-outline">閉じる</button>
             </div>
+            <h4 class="register-history-title">対応の記録</h4>
+            <div id="register-activity-new" class="register-activity-new"></div>
+            <ul id="register-activities" class="register-history"></ul>
+            <p id="register-activities-empty" class="hint" hidden>まだ記録がありません。</p>
             <h4 class="register-history-title">履歴（保存した日時・職員）</h4>
             <ul id="register-history" class="register-history"></ul>
             <div id="register-version" class="sub-view" hidden></div>
@@ -285,12 +292,12 @@
     </div>
   </footer>
 
-  <script src="/form/crypto.js?v=20261009-3"></script>
-  <script src="/form/render.js?v=20261009-3"></script>
-  <script src="/form/values.js?v=20261009-3"></script>
-  <script src="/staff/forms.js?v=20261009-3"></script>
-  <script src="/staff/form-editor.js?v=20261009-3"></script>
-  <script src="/staff/unlock.js?v=20261009-3"></script>
-  <script src="/staff/register.js?v=20261009-3"></script>
+  <script src="/form/crypto.js?v=20261009-4"></script>
+  <script src="/form/render.js?v=20261009-4"></script>
+  <script src="/form/values.js?v=20261009-4"></script>
+  <script src="/staff/forms.js?v=20261009-4"></script>
+  <script src="/staff/form-editor.js?v=20261009-4"></script>
+  <script src="/staff/unlock.js?v=20261009-4"></script>
+  <script src="/staff/register.js?v=20261009-4"></script>
 </body>
 </html>

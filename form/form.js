@@ -50,6 +50,7 @@ async function start() {
   document.getElementById('title').textContent = page.title;
   document.getElementById('description').textContent = page.description;
   document.getElementById('secure-note').hidden = !page.encrypt;
+  if (office && page.clientSelect) await setupClientSelect();
   steps = FormRender.splitPages(page.fields).map((p) => {
     const box = document.createElement('section');
     const grid = document.createElement('div');
@@ -97,6 +98,33 @@ function previewForm() {
   return form;
 }
 
+// 事務所用で「顧問先を選ぶ」入力ページ：顧問先の一覧を選択肢にする（?code= があれば選んでおく）
+async function setupClientSelect() {
+  let clients = [];
+  try {
+    const res = await fetch('/api/staff/clients/list', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    clients = (await res.json()).clients || [];
+  } catch {
+    throw new Error(NETWORK_ERROR);
+  }
+  const select = document.getElementById('client-select');
+  select.replaceChildren(new Option('選択してください', ''), ...clients.map((c) => new Option(c.code, c.code)));
+  const code = new URLSearchParams(location.search).get('code');
+  if (code && clients.some((c) => c.code === code)) select.value = code;
+  document.getElementById('client-select-row').hidden = false;
+}
+
+// 選んだ顧問先（選ぶ必要がなければ ''、選んでいなければ null）
+function selectedClient() {
+  if (!office || !page.clientSelect) return '';
+  const select = document.getElementById('client-select');
+  if (select.value) return select.value;
+  showFormError('顧問先を選んでください。');
+  select.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  select.focus();
+  return null;
+}
+
 function showInvalid(text) {
   document.getElementById('loading').hidden = true;
   const invalid = document.getElementById('invalid');
@@ -121,6 +149,8 @@ form.addEventListener('submit', async (event) => {
   }
   const answers = collect();
   if (!answers) return;
+  const code = selectedClient();
+  if (code === null) return;
   sendButton.disabled = true;
   sendButton.textContent = '送信しています…';
   try {
@@ -132,6 +162,7 @@ form.addEventListener('submit', async (event) => {
       }
     } else {
       const body = { ...who };
+      if (code) body.code = code;
       const batch = await sendFiles(answers);
       if (batch) body.batch = batch;
       sendButton.textContent = '送信しています…';

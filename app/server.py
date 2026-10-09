@@ -706,6 +706,8 @@ def check_form(form):
         "description": text(form.get("description", ""), 2000, "説明"),
         "encrypt": encrypt,
         "kind": kind,
+        # 事務所用で、入力のときに顧問先を選ぶ（顧客台帳の「対応の記録」に出す）
+        "clientSelect": form.get("clientSelect") is True and kind == "office",
         # 顧問先が保存する PDF で、項目を枠で囲むか
         "pdfBorder": form.get("pdfBorder") is not False,
         "labelPosition": form.get("labelPosition") if form.get("labelPosition") in LABEL_POSITIONS else "top",
@@ -829,6 +831,8 @@ def handle_form_get(body):
 def form_page(form):
     """入力画面に渡す内容（項目と表示の設定。暗号化するなら事務所の公開鍵も）"""
     data = {k: form[k] for k in ("title", "description", "encrypt", "fields")}
+    if form.get("clientSelect"):
+        data["clientSelect"] = True
     # 設定を作る前の入力ページは、枠あり・項目名は上・説明は入力欄の上
     data["pdfBorder"] = form.get("pdfBorder", True)
     data["labelPosition"] = form.get("labelPosition", "top")
@@ -985,7 +989,13 @@ def handle_office_get(body):
 def handle_office_submit(body):
     form_id = body.get("formId")
     form = find_office_form(form_id)
-    return save_submission(form_id, form, OFFICE_CODE, body, f"office:{form_id}", staff_name(body))
+    code = OFFICE_CODE
+    if form.get("clientSelect"):
+        # 顧問先を選ぶ入力ページ：選んだ顧問先の番号を残す（顧客台帳の「対応の記録」に出す）
+        code = check_code(body.get("code"))
+        if not find_folder(code):
+            raise UploadError(404, f"{code} は登録されていません。")
+    return save_submission(form_id, form, code, body, f"office:{form_id}", staff_name(body))
 
 
 def handle_office_file_session(body):
@@ -1068,6 +1078,25 @@ def handle_register_history(body):
     items = [{"id": r[0], "submitted": r[1], "staff": r[3]} for r in rows if r[2] == code]
     items.sort(key=lambda x: parse_time(x["submitted"]), reverse=True)
     return {"history": items}
+
+
+def handle_register_activities(body):
+    """1社の対応の記録（顧問先を選ぶ事務所用の入力ページに送られたもの）。新しい順。中身は submissions/get で開く"""
+    code = check_code(body.get("code"))
+    forms = load_json(FORMS_FILE)
+    sheets = load_json(SHEETS_FILE)
+    targets = [(fid, f) for fid, f in forms.items() if f.get("kind") == "office" and f.get("clientSelect")]
+    items = []
+    for fid, form in targets:
+        info = sheets.get(fid)
+        if not info:
+            continue
+        for row in sheets_values(info["id"], MAIN_SHEET, "A2:D"):
+            row = row + [""] * (4 - len(row))
+            if ROW_ID_RE.match(row[0]) and row[2] == code:
+                items.append({"formId": fid, "formTitle": form["title"], "id": row[0], "submitted": row[1], "staff": row[3]})
+    items.sort(key=lambda x: parse_time(x["submitted"]), reverse=True)
+    return {"activities": items, "forms": [{"id": fid, "title": f["title"]} for fid, f in targets]}
 
 
 def client_view(token, client):
@@ -1500,6 +1529,7 @@ STAFF_ROUTES = {
     "/register/save": handle_register_save,
     "/register/records": handle_register_records,
     "/register/history": handle_register_history,
+    "/register/activities": handle_register_activities,
     "/office/get": handle_office_get,
     "/office/submit": handle_office_submit,
     "/office/file-session": handle_office_file_session,
@@ -1510,7 +1540,8 @@ STAFF_ROUTES = {
 }
 # 見るだけの API（変更の記録を残さない）
 STAFF_READ_ONLY = {"/clients/list", "/clients/qr", "/forms/list", "/requests/list", "/requests/qr",
-                   "/submissions/list", "/office/get", "/unlocks/list", "/register/records", "/register/history"}
+                   "/submissions/list", "/office/get", "/unlocks/list", "/register/records", "/register/history",
+                   "/register/activities"}
 
 
 class Handler(BaseHTTPRequestHandler):
