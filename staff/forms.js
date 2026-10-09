@@ -30,8 +30,8 @@ function showKind() {
   current.classList.add('is-current');
   current.setAttribute('aria-current', 'page');
   document.getElementById('kind-note').textContent = office
-    ? '報告書など、職員が外出先などからこのページで入力するためのページです。「入力する」から入力します。入力した内容はドライブの「事務所の記録」フォルダに保存され、入力した職員のIDも残ります。'
-    : '顧問先に入力してもらうページです。「依頼URL」で顧問先ごとのURLを発行し、届いた内容は顧問先のドライブのフォルダに保存されます。';
+    ? '報告書など、職員が外出先などからこのページで入力するためのページです。「入力する」から入力します。入力した内容はドライブの「事務所の記録」フォルダの、入力ページごとのスプレッドシートに1件1行で保存され、入力した職員のIDも残ります。'
+    : '顧問先に入力してもらうページです。「依頼URL」で顧問先ごとのURLを発行します。届いた内容はドライブの「入力内容」フォルダの、入力ページごとのスプレッドシートに1件1行で保存されます（添付ファイルは顧問先のフォルダに入ります）。';
   document.getElementById('forms-count-head').textContent = office ? '' : '依頼';
   document.getElementById('sub-who-head').textContent = office ? '入力した職員' : '顧問先';
   // 事務所用は顧問先ごとに分けないので、「最新の1件だけ」は使わない
@@ -280,11 +280,35 @@ async function openSubmissions(form) {
   document.getElementById('submissions-title').textContent = `「${form.title}」に届いた内容`;
   subView.hidden = true;
   subView.replaceChildren();
-  submissions = (await api('submissions/list', { formId: form.id })).submissions;
-  renderSubmissions();
+  await loadSubmissions();
   subCard.hidden = false;
   subCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
+
+async function loadSubmissions() {
+  const data = await api('submissions/list', { formId: current.id });
+  submissions = data.submissions;
+  const link = document.getElementById('sub-sheet-link');
+  if (data.sheetUrl) link.href = data.sheetUrl;
+  document.getElementById('sub-sheet').hidden = !data.sheetUrl;
+  // 以前の形（1件ずつの JSON ファイル）で届いている分は、スプレッドシートに移せる
+  document.getElementById('sub-migrate-text').textContent =
+    `以前の形（1件ずつの JSON ファイル）で届いている入力内容が${data.legacy}件あります。スプレッドシートに移すと、JSON ファイルはドライブのゴミ箱に移ります。暗号化したものは暗号化されたまま移します。`;
+  document.getElementById('sub-migrate').hidden = !data.legacy;
+  renderSubmissions();
+}
+
+document.getElementById('sub-migrate-run').addEventListener('click', () => run(async () => {
+  let moved = 0;
+  for (;;) {
+    const result = await api('submissions/migrate', { formId: current.id });
+    moved += result.moved;
+    showMessage(`スプレッドシートに移しています（${moved}件）…`, 'ok');
+    if (!result.remaining || !result.moved) break;
+  }
+  await loadSubmissions();
+  showMessage(`${moved}件をスプレッドシートに移しました`, 'ok');
+}));
 
 function visibleSubmissions() {
   if (!document.getElementById('sub-latest').checked) return submissions;
@@ -301,9 +325,9 @@ function renderSubmissions() {
     ops.className = 'ops';
     const show = () => ops.replaceChildren(
       button('表示', () => run(() => showSubmission(sub))),
-      button('削除', () => askConfirm(ops, `${senderOf(sub)}（${formatDate(sub.submitted)}）の入力内容を削除しますか？ 添付ファイルも一緒に、ドライブのゴミ箱に移り、30日後に完全に削除されます。`,
+      button('削除', () => askConfirm(ops, `${senderOf(sub)}（${formatDate(sub.submitted)}）の入力内容を削除しますか？ 添付ファイルもドライブのゴミ箱に移ります（30日後に完全に削除）。`,
         '削除する', async () => {
-          await api('submissions/remove', { id: sub.id });
+          await api('submissions/remove', { formId: current.id, id: sub.id });
           submissions = submissions.filter((s) => s !== sub);
           subView.hidden = true;
           subView.replaceChildren();
@@ -320,7 +344,7 @@ function renderSubmissions() {
 
 // 入力内容のファイルを読み込み、暗号化されていれば復号する
 async function openRecord(id) {
-  const { record } = await api('submissions/get', { id });
+  const { record } = await api('submissions/get', { formId: current.id, id });
   if (!record.encrypted) return { record, answers: record.answers || {} };
   if (!loadedKey) throw new Error('暗号化されています。先に「暗号化の鍵」で鍵を読み込んでください');
   if (record.encrypted.keyId !== loadedKey.fingerprint) {

@@ -7,6 +7,7 @@ import email
 import hashlib
 import http.client
 import json
+import re
 import os
 import tempfile
 import threading
@@ -314,6 +315,42 @@ class DriveRequestTest(unittest.TestCase):
         self.assertEqual(second["pageToken"], "next")
 
 
+class FakeSheets:
+    """Google スプレッドシートの代わり（シートごとの行の一覧）。API と同じく、行末の空のマスは返さない"""
+
+    def __init__(self):
+        self.books = {}
+
+    def create(self, folder_id, name):
+        sid = f"sheet{len(self.books) + 1:06d}"
+        self.books[sid] = {"folder": folder_id, "name": name,
+                           server.MAIN_SHEET: [list(server.SHEET_HEADER)], server.FIELDS_SHEET: [["項目の版", "項目（JSON）"]]}
+        return sid
+
+    def append(self, sid, sheet, rows):
+        self.books[sid][sheet].extend(list(r) for r in rows)
+
+    def values(self, sid, sheet, cells):
+        c1, r1, c2, r2 = re.match(r"^([A-Z])(\d+):([A-Z])(\d*)$", cells).groups()
+        rows = self.books[sid][sheet]
+        out = []
+        for row in rows[int(r1) - 1:int(r2) if r2 else len(rows)]:
+            part = row[ord(c1) - 65:ord(c2) - 64]
+            while part and part[-1] == "":
+                part.pop()
+            out.append(part)
+        return out
+
+    def delete_row(self, sid, sheet_id, row_number):
+        assert sheet_id == 0
+        del self.books[sid][server.MAIN_SHEET][row_number - 1]
+
+    def rows(self, sid=None):
+        """見出しを除いた「入力内容」の行"""
+        sid = sid or next(iter(self.books))
+        return self.books[sid][server.MAIN_SHEET][1:]
+
+
 class FormTest(unittest.TestCase):
     """入力ページ（事務所内ページでの作成・URLの発行と、顧問先からの送信）"""
 
@@ -322,7 +359,8 @@ class FormTest(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.dir.cleanup)
-        for name in ("CLIENTS_FILE", "FORMS_FILE", "REQUESTS_FILE", "KEY_FILE", "OFFICE_FILE", "UNLOCKS_FILE"):
+        for name in ("CLIENTS_FILE", "FORMS_FILE", "REQUESTS_FILE", "KEY_FILE", "OFFICE_FILE", "UNLOCKS_FILE",
+                     "RECORDS_FILE", "SHEETS_FILE"):
             p = mock.patch.object(server, name, os.path.join(self.dir.name, name.lower()))
             p.start()
             self.addCleanup(p.stop)
@@ -344,6 +382,15 @@ class FormTest(unittest.TestCase):
             p = mock.patch.object(server, name, m)
             p.start()
             self.addCleanup(p.stop)
+        self.sheets = FakeSheets()
+        fakes = {"sheets_create": self.sheets.create, "sheets_append": self.sheets.append,
+                 "sheets_values": self.sheets.values, "sheets_delete_row": self.sheets.delete_row,
+                 "create_folder": mock.Mock(side_effect=lambda name, parent_id=None: f"folder-{name}")}
+        for name, fake in fakes.items():
+            p = mock.patch.object(server, name, fake)
+            p.start()
+            self.addCleanup(p.stop)
+        server._fields_cache.clear()
         self.ports = {}
         for kind, handler in (("public", server.Handler), ("staff", server.StaffHandler)):
             httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
@@ -623,19 +670,19 @@ class FormTest(unittest.TestCase):
         batch = "b" * 20
         body = {"token": token, "encrypted": self.encrypted(), "batch": batch}
         self.assertEqual(self.post("/form/submit", body)[0], 200)
-        props = self.drive["create_json_file"].call_args.args[3]
-        self.assertEqual(props["kabaBatch"], batch)
+        row_id = self.sheets.rows()[0][0]
+        self.assertEqual(self.sheets.rows()[0][4], batch)
         self.assertEqual(self.post("/form/submit", {**body, "batch": "x"})[0], 400)
-        # 入力内容を削除すると、一緒に送られたファイルも消す（入力内容のファイル自体は消さない）
-        self.drive["get_file"].return_value = {"id": "file123456", "size": "100",
-                                               "appProperties": {"kabaForm": form_id, "kabaBatch": batch}}
+        # 入力内容を削除すると行を消し、一緒に送られたファイル（添付）もゴミ箱へ
         self.drive["list_by_property"].return_value = [
             {"id": "attached01", "appProperties": {"kabaFileOf": form_id, "kabaBatch": batch}},
             {"id": "notattach1", "appProperties": {"kabaBatch": batch}},
         ]
-        self.assertEqual(self.staff("/submissions/remove", {"id": "file123456"})[0], 200)
+        self.assertEqual(self.staff("/submissions/remove", {"formId": form_id, "id": row_id})[0], 200)
+        self.assertEqual(self.sheets.rows(), [])
         self.drive["list_by_property"].assert_called_once_with("kabaBatch", batch)
-        self.assertEqual([c.args[0] for c in self.drive["trash_file"].call_args_list], ["file123456", "attached01"])
+        self.assertEqual([c.args[0] for c in self.drive["trash_file"].call_args_list], ["attached01"])
+        self.assertEqual(self.staff("/submissions/remove", {"formId": form_id, "id": row_id})[0], 404)
 
     def test_staff_file_download(self):
         response = mock.MagicMock()
@@ -715,10 +762,14 @@ class FormTest(unittest.TestCase):
             self.assertEqual(self.staff_as("/office/submit", body)[0], 200)
             self.assertEqual(self.staff_as("/office/submit", body, user="sato")[0], 200)
         create.assert_called_once_with("事務所の記録")   # フォルダは一度だけ作る
-        folder, name, record, props = self.drive["create_json_file"].call_args.args
-        self.assertEqual(folder, "officeFolder01")
+        book = next(iter(self.sheets.books.values()))
+        self.assertEqual((book["folder"], book["name"]), ("officeFolder01", "入力内容_年末調整の確認"))
+        self.assertEqual([r[2:4] for r in self.sheets.rows()], [["事務所", "tanaka"], ["事務所", "sato"]])
+        status, data = self.staff("/submissions/list", {"formId": form_id})
+        self.assertEqual(sorted(x["staff"] for x in data["submissions"]), ["sato", "tanaka"])   # 同じ秒なので順は問わない
+        status, data = self.staff("/submissions/get", {"formId": form_id, "id": self.sheets.rows()[1][0]})
+        record = data["record"]
         self.assertEqual((record["code"], record["staff"], record["answers"]), ("事務所", "sato", {"name": "ダミー"}))
-        self.assertEqual(props, {"kabaForm": form_id, "kabaCode": "事務所", "kabaStaff": "sato"})
         # 顧問先用の入力ページは、事務所用の入口から使えない
         status, data = self.staff("/forms/save", {"form": self.form(encrypt=False)})
         self.assertEqual(self.staff_as("/office/get", {"formId": data["form"]["id"]})[0], 404)
@@ -812,7 +863,8 @@ class FormTest(unittest.TestCase):
         self.drive["list_form_files"].return_value = [
             {"id": "file123456", "createdTime": "2026-10-07T01:00:00Z", "appProperties": {"kabaCode": "C001"}}]
         status, data = self.staff("/submissions/list", {"formId": "f000000000000"})
-        self.assertEqual(data["submissions"], [{"id": "file123456", "code": "C001", "staff": "", "submitted": "2026-10-07T01:00:00Z"}])
+        self.assertEqual(data, {"submissions": [{"id": "file123456", "code": "C001", "staff": "", "submitted": "2026-10-07T01:00:00Z",
+                                                 "legacy": True}], "legacy": 1, "sheetUrl": None})
         self.assertEqual(self.staff("/submissions/get", {"id": "file123456"}), (200, {"record": {"version": 1}}))
         self.assertEqual(self.staff("/submissions/remove", {"id": "file123456"})[0], 200)
         self.drive["trash_file"].assert_called_once_with("file123456")
@@ -821,6 +873,78 @@ class FormTest(unittest.TestCase):
         self.assertEqual(self.staff("/submissions/get", {"id": "file123456"})[0], 404)
         self.assertEqual(self.staff("/submissions/remove", {"id": "file123456"})[0], 404)
         self.assertEqual(self.staff("/submissions/get", {"id": "../x"})[0], 400)
+
+    def test_sheet_records(self):
+        form_id, token = self.make_request(encrypt=False)
+        for name in ("一人目", "二人目"):
+            self.assertEqual(self.post("/form/submit", {"token": token, "answers": {"name": name}})[0], 200)
+        # 項目の版は一度だけ残す。入力ページを直すと新しい版になり、前の行は前の項目のまま開ける
+        sid = next(iter(self.sheets.books))
+        self.assertEqual(len(self.sheets.books[sid][server.FIELDS_SHEET]), 2)
+        old_row = self.sheets.rows()[0][0]
+        changed = self.form(encrypt=False)
+        changed["fields"][1]["label"] = "お名前"
+        self.assertEqual(self.staff("/forms/save", {"id": form_id, "form": changed})[0], 200)
+        self.assertEqual(self.post("/form/submit", {"token": token, "answers": {"name": "三人目"}})[0], 200)
+        self.assertEqual(len(self.sheets.books[sid][server.FIELDS_SHEET]), 3)
+        server._fields_cache.clear()
+        status, data = self.staff("/submissions/get", {"formId": form_id, "id": old_row})
+        self.assertEqual((data["record"]["fields"][1]["label"], data["record"]["answers"]), ("氏名", {"name": "一人目"}))
+        status, data = self.staff("/submissions/list", {"formId": form_id})
+        self.assertEqual(len(data["submissions"]), 3)
+        self.assertEqual(data["sheetUrl"], f"https://docs.google.com/spreadsheets/d/{sid}/edit")
+        self.assertEqual(self.staff("/submissions/get", {"formId": form_id, "id": "R" + "0" * 16})[0], 404)
+
+    def test_sheet_failure_falls_back_to_json(self):
+        form_id, token = self.make_request(encrypt=False)
+        with mock.patch.object(server, "sheets_create", side_effect=RuntimeError("403 Sheets API disabled")), \
+                self.assertLogs("upload", "ERROR"):
+            status, data = self.post("/form/submit", {"token": token, "answers": {"name": "ダミー"}, "batch": "b" * 20})
+        self.assertEqual(status, 200)   # 顧問先の送信は失敗させない
+        folder, name, record, props = self.drive["create_json_file"].call_args.args
+        self.assertEqual((folder, record["answers"]), (FOLDER, {"name": "ダミー"}))
+        self.assertRegex(name, r"^\d{8}-\d{6}_年末調整の確認\.json$")
+        self.assertEqual(props, {"kabaForm": form_id, "kabaCode": "C001", "kabaBatch": "b" * 20})
+
+    def test_long_record_is_split(self):
+        form_id, token = self.make_request()
+        self.set_key()
+        long_data = "QUJD" * 50000   # 20万字 → 5つのマスに分ける
+        enc = {**self.encrypted(), "data": long_data}
+        self.assertEqual(self.post("/form/submit", {"token": token, "encrypted": enc})[0], 200)
+        row = self.sheets.rows()[0]
+        self.assertEqual(len(row), 9 + 5)
+        self.assertTrue(all(len(cell) <= 45000 for cell in row))
+        status, data = self.staff("/submissions/get", {"formId": form_id, "id": row[0]})
+        self.assertEqual(data["record"]["encrypted"]["data"], long_data)
+
+    def test_migrate_json_to_sheet(self):
+        form_id, token = self.make_request(encrypt=False)
+        legacy = [{"id": f"oldfile{i:04d}", "size": "100", "createdTime": f"2026-10-0{i + 1}T01:00:00Z",
+                   "appProperties": {"kabaForm": form_id, "kabaCode": "C001", **({"kabaBatch": "b" * 20} if i == 0 else {})}}
+                  for i in range(12)]
+        records = {f["id"]: {"version": 1, "code": "C001", "submitted": f["createdTime"], "fields": self.form()["fields"],
+                             "answers": {"name": f["id"]}} for f in legacy}
+        self.drive["list_form_files"].side_effect = lambda fid: [f for f in legacy if f["id"] not in trashed]
+        trashed = set()
+        self.drive["trash_file"].side_effect = trashed.add
+        self.drive["download_json"].side_effect = lambda fid: records[fid]
+        status, data = self.staff("/submissions/migrate", {"formId": form_id})
+        self.assertEqual(data, {"moved": 10, "remaining": 2})
+        status, data = self.staff("/submissions/migrate", {"formId": form_id})
+        self.assertEqual(data, {"moved": 2, "remaining": 0})
+        self.assertEqual(len(self.sheets.rows()), 12)
+        self.assertEqual(trashed, {f["id"] for f in legacy})
+        self.assertEqual(self.sheets.rows()[0][4], "b" * 20)   # 添付の番号も移す
+        # 途中で止まってやり直しても、二重には入らない（ゴミ箱に移す前に止まった場合）
+        trashed.discard("oldfile0003")
+        self.assertEqual(self.staff("/submissions/migrate", {"formId": form_id})[1], {"moved": 1, "remaining": 0})
+        self.assertEqual(len(self.sheets.rows()), 12)
+        status, data = self.staff("/submissions/list", {"formId": form_id})
+        self.assertEqual((len(data["submissions"]), data["legacy"]), (12, 0))
+        row = self.sheets.rows()[5]
+        status, data = self.staff("/submissions/get", {"formId": form_id, "id": row[0]})
+        self.assertEqual(data["record"]["answers"], {"name": "oldfile0005"})
 
     # --- 顧問先の入力ページ ---
 
@@ -839,10 +963,15 @@ class FormTest(unittest.TestCase):
         self.set_key()
         status, data = self.post("/form/submit", {"token": token, "encrypted": self.encrypted()})
         self.assertEqual(status, 200, data)
-        folder, name, record, props = self.drive["create_json_file"].call_args.args
-        self.assertEqual(folder, FOLDER)
-        self.assertRegex(name, r"^\d{8}-\d{6}_年末調整の確認\.json$")
-        self.assertEqual(props, {"kabaForm": form_id, "kabaCode": "C001"})
+        book = next(iter(self.sheets.books.values()))
+        self.assertEqual((book["folder"], book["name"]), ("folder-入力内容", "入力内容_年末調整の確認"))
+        row = self.sheets.rows()[0]
+        self.assertRegex(row[0], server.ROW_ID_RE)
+        self.assertEqual(row[2:5], ["C001", "", ""])
+        self.assertEqual(row[6:10], [server.public_key()["fingerprint"], "QUJD", "QUJD", "QUJD" * 2000])
+        # 事務所内ページで開くと、送信したときの項目と一緒に返る
+        status, data = self.staff("/submissions/get", {"formId": form_id, "id": row[0]})
+        record = data["record"]
         self.assertEqual(record["encrypted"]["data"], "QUJD" * 2000)
         self.assertNotIn("answers", record)
         self.assertEqual(len(record["fields"]), 5)
@@ -856,16 +985,18 @@ class FormTest(unittest.TestCase):
         self.assertEqual(self.post("/form/submit", {"token": token, "encrypted": bad})[0], 400)
         # 暗号化する入力ページに、暗号化していない内容は送れない
         self.assertEqual(self.post("/form/submit", {"token": token, "answers": {"name": "ダミー"}})[0], 400)
-        self.drive["create_json_file"].assert_not_called()
+        self.assertEqual(self.sheets.books, {})
 
     def test_submit_plain(self):
         _, token = self.make_request(encrypt=False)
         answers = {"name": "ダミー太郎", "agree": True, "kind": "甲", "family": [{"name": "ダミー花子", "birth": "2000-01-01"}]}
         self.assertEqual(self.post("/form/get", {"token": token})[0], 200)   # 鍵がなくても開ける
         self.assertEqual(self.post("/form/submit", {"token": token, "answers": answers})[0], 200)
-        record = self.drive["create_json_file"].call_args.args[2]
-        self.assertEqual(record["answers"], answers)
-        self.assertNotIn("encrypted", record)
+        row = self.sheets.rows()[0]
+        self.assertEqual(row[6], "なし")
+        status, data = self.staff("/submissions/get", {"formId": _, "id": row[0]})
+        self.assertEqual(data["record"]["answers"], answers)
+        self.assertNotIn("encrypted", data["record"])
 
     def test_submit_plain_rejects(self):
         _, token = self.make_request(encrypt=False)
@@ -880,7 +1011,7 @@ class FormTest(unittest.TestCase):
         ]
         for answers in bad:
             self.assertEqual(self.post("/form/submit", {"token": token, "answers": answers})[0], 400, answers)
-        self.drive["create_json_file"].assert_not_called()
+        self.assertEqual(self.sheets.books, {})
 
     def test_submit_after_client_removed(self):
         _, token = self.make_request(encrypt=False)

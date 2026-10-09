@@ -22,6 +22,7 @@ import secrets
 import threading
 import time
 from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import requests
@@ -39,6 +40,8 @@ REQUESTS_FILE = os.path.join(DATA_DIR, "form-requests.json")   # 入力ページ
 KEY_FILE = os.path.join(DATA_DIR, "public-key.json")           # 事務所の公開鍵（暗号化用。復号はできない）
 OFFICE_FILE = os.path.join(DATA_DIR, "office-folder.json")      # 「事務所の記録」フォルダ（事務所用の入力ページの保存先）
 UNLOCKS_FILE = os.path.join(DATA_DIR, "key-unlocks.json")       # 鍵の開け方（セキュリティキー・パスキーとパスワードで閉じた秘密鍵）
+RECORDS_FILE = os.path.join(DATA_DIR, "records-folder.json")    # 「入力内容」フォルダ（顧問先用の入力ページのスプレッドシートの置き場所）
+SHEETS_FILE = os.path.join(DATA_DIR, "form-sheets.json")        # 入力ページ → スプレッドシート（と、書き込んだ項目の版）
 ROOT_NAME = "顧問先資料"
 ALLOWED_ORIGIN = os.environ.get("UPLOAD_ALLOWED_ORIGIN", "https://kabaoffice.com")
 UPLOAD_BASE_URL = ALLOWED_ORIGIN + "/upload/#"
@@ -70,6 +73,7 @@ ALLOWED_TYPES = {
 
 DRIVE_API = "https://www.googleapis.com/drive/v3/files"
 DRIVE_UPLOAD_API = "https://www.googleapis.com/upload/drive/v3/files"
+SHEETS_API = "https://sheets.googleapis.com/v4/spreadsheets"
 SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 JST = timezone(timedelta(hours=9))
 TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{20,128}$")
@@ -85,6 +89,17 @@ BATCH_RE = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
 # 入力ページの種類：顧問先用（URL を発行して顧問先が入力）と事務所用（職員が事務所内ページで入力）
 FORM_KINDS = {"client", "office"}
 OFFICE_NAME = "事務所の記録"
+RECORDS_NAME = "入力内容"
+# 入力内容のスプレッドシート：入力ページごとに1つ。1件1行で、入力内容は暗号化したまま（暗号化しない入力ページは JSON のまま）
+# マスに入る文字数に上限（5万字）があるので、長い入力内容は「データ1」「データ2」…に分けて入れる。
+# 送信したときの項目（部品の並び）は「項目」のシートに版ごとに1行で残し、入力内容の行は版の番号を持つ
+MAIN_SHEET = "入力内容"
+FIELDS_SHEET = "項目"
+SHEET_CHUNK = 45000
+MAX_CHUNKS = 8
+SHEET_HEADER = ["番号", "送信日時", "顧問先", "入力した職員", "添付の番号", "項目の版", "暗号化の鍵", "包んだ鍵", "iv",
+                *[f"データ{i}" for i in range(1, MAX_CHUNKS + 1)]]
+ROW_ID_RE = re.compile(r"^R[0-9a-f]{16}$")
 OFFICE_CODE = "事務所"
 FIELD_ID_RE = re.compile(r"^[a-z0-9_]{1,40}$")
 B64_RE = re.compile(r"^[A-Za-z0-9+/]+={0,2}$")
@@ -330,6 +345,60 @@ def download_json(file_id):
     return r.json()
 
 
+# --- Google スプレッドシート（アプリが作ったものだけを読み書きする。権限は drive.file のまま） ---
+
+def sheet_range(sheet, cells):
+    return quote(f"'{sheet}'!{cells}", safe="")
+
+
+def sheets_call(method, path, **kw):
+    r = requests.request(method, SHEETS_API + path, headers=auth_headers(), timeout=60, **kw)
+    if r.status_code == 403:
+        log.error("sheets api forbidden (Google Sheets API が有効か確認): %s", r.text[:200])
+    r.raise_for_status()
+    return r.json()
+
+
+def sheets_create(folder_id, name):
+    """フォルダにスプレッドシートを作り、「入力内容」「項目」のシートと見出しを用意する"""
+    r = requests.post(
+        DRIVE_API,
+        params={"fields": "id", "supportsAllDrives": "true"},
+        headers=auth_headers(),
+        json={"name": name, "parents": [folder_id], "mimeType": "application/vnd.google-apps.spreadsheet"},
+        timeout=30,
+    )
+    r.raise_for_status()
+    sid = r.json()["id"]
+    try:
+        sheets_call("POST", f"/{sid}:batchUpdate", json={"requests": [
+            {"updateSheetProperties": {"properties": {"sheetId": 0, "title": MAIN_SHEET}, "fields": "title"}},
+            {"addSheet": {"properties": {"sheetId": 1, "title": FIELDS_SHEET}}},
+        ]})
+        sheets_append(sid, MAIN_SHEET, [SHEET_HEADER])
+        sheets_append(sid, FIELDS_SHEET, [["項目の版", "項目（JSON）"]])
+    except Exception:
+        trash_file(sid)   # 作りかけを残さない（次の送信でまた作り直す）
+        raise
+    return sid
+
+
+def sheets_append(sid, sheet, rows):
+    """行を足す。RAW なので「=」で始まる値も数式にはならない"""
+    sheets_call("POST", f"/{sid}/values/{sheet_range(sheet, 'A1')}:append",
+                params={"valueInputOption": "RAW", "insertDataOption": "INSERT_ROWS"}, json={"values": rows})
+
+
+def sheets_values(sid, sheet, cells):
+    return sheets_call("GET", f"/{sid}/values/{sheet_range(sheet, cells)}").get("values", [])
+
+
+def sheets_delete_row(sid, sheet_id, row_number):
+    """行を消す（row_number は1から数えた行の番号）"""
+    sheets_call("POST", f"/{sid}:batchUpdate", json={"requests": [{"deleteDimension": {"range": {
+        "sheetId": sheet_id, "dimension": "ROWS", "startIndex": row_number - 1, "endIndex": row_number}}}]})
+
+
 # --- 顧問先の対応表（URLの鍵 → ドライブのフォルダ） ---
 
 _clients_lock = threading.Lock()
@@ -372,6 +441,16 @@ def office_folder():
             office = {"folder_id": create_folder(OFFICE_NAME)}
             save_json(OFFICE_FILE, office)
     return office["folder_id"]
+
+
+def records_folder():
+    """「入力内容」フォルダのIDを返す。なければ作る"""
+    with _clients_lock:
+        records = load_json(RECORDS_FILE)
+        if not records:
+            records = {"folder_id": create_folder(RECORDS_NAME)}
+            save_json(RECORDS_FILE, records)
+    return records["folder_id"]
 
 
 def check_code(code):
@@ -744,14 +823,13 @@ def form_page(form):
 def handle_form_submit(body):
     token = body.get("token")
     req, form = find_request(token)
-    folder_id = find_folder(req["code"])
-    if not folder_id:
+    if not find_folder(req["code"]):   # 削除した顧問先の URL は使えない
         raise UploadError(403, "このURLは無効です。事務所にお問い合わせください。")
-    return save_submission(req["form_id"], form, folder_id, req["code"], body, token)
+    return save_submission(req["form_id"], form, req["code"], body, token)
 
 
-def save_submission(form_id, form, folder_id, code, body, rate_key, staff=None):
-    """入力内容をドライブに保存する（顧問先用・事務所用で共通）。staff は事務所用で入力した職員"""
+def save_submission(form_id, form, code, body, rate_key, staff=None):
+    """入力内容を入力ページのスプレッドシートに保存する（顧問先用・事務所用で共通）。staff は事務所用で入力した職員"""
     if form["encrypt"]:
         enc = body.get("encrypted")
         key = public_key()
@@ -782,17 +860,32 @@ def save_submission(form_id, form, folder_id, code, body, rate_key, staff=None):
         "fields": form["fields"],
         **content,
     }
-    title = form_title_for_name(form)
-    props = {"kabaForm": form_id, "kabaCode": code}
-    if batch:
-        props["kabaBatch"] = batch   # 一緒に送られたファイル（入力内容を削除するときに一緒に消す）
     if staff:
         record["staff"] = staff
-        props["kabaStaff"] = staff
-    create_json_file(folder_id, f"{now:%Y%m%d-%H%M%S}_{title}.json", record, props)
+    # 入力ページのスプレッドシートに1行足す（batch は一緒に送られたファイル。入力内容を削除するときに一緒に消す）
+    try:
+        append_record(form_id, form, "R" + secrets.token_hex(8), record, batch)
+    except UploadError:
+        raise
+    except Exception:
+        # スプレッドシートに書けないとき（Google Sheets API が使えないなど）は、以前の形（JSON ファイル）で残す。
+        # 「届いた内容」の「スプレッドシートに移す」で、あとから取り込める
+        log.exception("sheet append failed; saved as json form=%s", form_id)
+        save_json_record(form_id, form, code, record, batch, staff)
     # 入力内容は記録に残さない
     log.info("form submitted code=%s form=%s encrypted=%s staff=%s", code, form_id, form["encrypt"], staff or "-")
     return {"ok": True, "submitted": record["submitted"]}
+
+
+def save_json_record(form_id, form, code, record, batch, staff):
+    folder_id = office_folder() if form.get("kind") == "office" else find_folder(code)
+    props = {"kabaForm": form_id, "kabaCode": code}
+    if batch:
+        props["kabaBatch"] = batch
+    if staff:
+        props["kabaStaff"] = staff
+    now = datetime.fromisoformat(record["submitted"])
+    create_json_file(folder_id, f"{now:%Y%m%d-%H%M%S}_{form_title_for_name(form)}.json", record, props)
 
 
 def form_title_for_name(form):
@@ -866,7 +959,7 @@ def handle_office_get(body):
 def handle_office_submit(body):
     form_id = body.get("formId")
     form = find_office_form(form_id)
-    return save_submission(form_id, form, office_folder(), OFFICE_CODE, body, f"office:{form_id}", staff_name(body))
+    return save_submission(form_id, form, OFFICE_CODE, body, f"office:{form_id}", staff_name(body))
 
 
 def handle_office_file_session(body):
@@ -1079,13 +1172,144 @@ def handle_requests_qr(body):
     return {"dataUrl": qr.png_data_uri(scale=8, border=4)}
 
 
+# --- 入力内容のスプレッドシート ---
+
+_sheets_lock = threading.Lock()
+_fields_cache = {}   # (スプレッドシート, 項目の版) → 項目
+
+
+def form_sheet(form_id, form):
+    """入力ページのスプレッドシート（なければ作る）。顧問先用は「入力内容」、事務所用は「事務所の記録」フォルダに置く"""
+    with _sheets_lock:
+        sheets = load_json(SHEETS_FILE)
+        info = sheets.get(form_id)
+        if not info:
+            folder = office_folder() if form.get("kind") == "office" else records_folder()
+            info = {"id": sheets_create(folder, f"{RECORDS_NAME}_{form_title_for_name(form)}"), "versions": []}
+            sheets[form_id] = info
+            save_json(SHEETS_FILE, sheets)
+        return info
+
+
+def chunks(text_value):
+    return [text_value[i:i + SHEET_CHUNK] for i in range(0, len(text_value), SHEET_CHUNK)] or [""]
+
+
+def fields_version(form_id, fields):
+    """項目の版の番号を返す。初めての版なら「項目」のシートに残す"""
+    data = json.dumps(fields, ensure_ascii=False, sort_keys=True)
+    version = hashlib.sha256(data.encode()).hexdigest()[:16]
+    with _sheets_lock:
+        sheets = load_json(SHEETS_FILE)
+        info = sheets[form_id]
+        if version not in info["versions"]:
+            sheets_append(info["id"], FIELDS_SHEET, [[version, *chunks(data)]])
+            info["versions"].append(version)
+            save_json(SHEETS_FILE, sheets)
+    return version
+
+
+def append_record(form_id, form, row_id, record, batch):
+    info = form_sheet(form_id, form)
+    version = fields_version(form_id, record["fields"])
+    if "encrypted" in record:
+        enc = record["encrypted"]
+        keys, data = [enc["keyId"], enc["key"], enc["iv"]], enc["data"]
+    else:
+        keys, data = ["なし", "", ""], json.dumps(record["answers"], ensure_ascii=False)
+    parts = chunks(data)
+    if len(parts) > MAX_CHUNKS:
+        raise UploadError(400, "入力内容が大きすぎます。")
+    sheets_append(info["id"], MAIN_SHEET, [[row_id, record["submitted"], record["code"], record.get("staff", ""),
+                                            batch or "", version, *keys, *parts]])
+
+
+def find_row(form_id, row_id):
+    """番号の行を探して (スプレッドシートのID, 行の番号) を返す"""
+    if not isinstance(row_id, str) or not ROW_ID_RE.match(row_id):
+        raise UploadError(400, "入力内容が見つかりません。")
+    info = load_json(SHEETS_FILE).get(form_id)
+    if info:
+        for n, row in enumerate(sheets_values(info["id"], MAIN_SHEET, "A2:A"), start=2):
+            if row and row[0] == row_id:
+                return info["id"], n
+    raise UploadError(404, "入力内容が見つかりません。")
+
+
+def load_fields(sid, version):
+    if (sid, version) not in _fields_cache:
+        for row in sheets_values(sid, FIELDS_SHEET, "A2:Z"):
+            if row and row[0] == version:
+                _fields_cache[(sid, version)] = json.loads("".join(row[1:]))
+                break
+        else:
+            raise UploadError(404, "入力ページの項目が見つかりません。")
+    return _fields_cache[(sid, version)]
+
+
 def handle_submissions_list(body):
+    """届いた内容の一覧（スプレッドシートの行と、移し替える前の JSON ファイル）。新しい順"""
     form_id = check_form_id(body.get("formId"))
-    return {"submissions": [
-        {"id": f["id"], "code": f.get("appProperties", {}).get("kabaCode", ""),
-         "staff": f.get("appProperties", {}).get("kabaStaff", ""), "submitted": f.get("createdTime", "")}
-        for f in list_form_files(form_id)
-    ]}
+    items, sheet_url = [], None
+    info = load_json(SHEETS_FILE).get(form_id)
+    if info:
+        sheet_url = f"https://docs.google.com/spreadsheets/d/{info['id']}/edit"
+        for row in sheets_values(info["id"], MAIN_SHEET, "A2:D"):
+            row = row + [""] * (4 - len(row))
+            if ROW_ID_RE.match(row[0]):
+                items.append({"id": row[0], "submitted": row[1], "code": row[2], "staff": row[3]})
+    legacy = list_form_files(form_id)
+    for f in legacy:
+        props = f.get("appProperties", {})
+        items.append({"id": f["id"], "code": props.get("kabaCode", ""), "staff": props.get("kabaStaff", ""),
+                      "submitted": f.get("createdTime", ""), "legacy": True})
+    items.sort(key=lambda x: parse_time(x["submitted"]), reverse=True)
+    return {"submissions": items, "legacy": len(legacy), "sheetUrl": sheet_url}
+
+
+def parse_time(value):
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (AttributeError, ValueError):
+        return datetime.min.replace(tzinfo=timezone.utc)
+
+
+def row_record(sid, row):
+    row = row + [""] * (len(SHEET_HEADER) - len(row))
+    record = {"version": 1, "code": row[2], "staff": row[3], "submitted": row[1], "fields": load_fields(sid, row[5])}
+    data = "".join(row[9:])
+    if row[6] == "なし":
+        record["answers"] = json.loads(data)
+    else:
+        record["encrypted"] = {"keyId": row[6], "key": row[7], "iv": row[8], "data": data}
+    return record, row[4]
+
+
+def handle_submissions_migrate(body):
+    """移し替える前の JSON ファイルを、入力ページのスプレッドシートに移す（1回に10件まで。終わったら JSON はゴミ箱へ）。
+    行の番号は JSON ファイルから決めるので、途中で止まってやり直しても二重には入らない"""
+    form_id = check_form_id(body.get("formId"))
+    form = find_form(load_json(FORMS_FILE), form_id)
+    legacy = list_form_files(form_id)
+    if not legacy:
+        return {"moved": 0, "remaining": 0}
+    info = form_sheet(form_id, form)
+    existing = {row[0] for row in sheets_values(info["id"], MAIN_SHEET, "A2:A") if row}
+    moved = 0
+    for f in legacy[:10]:
+        row_id = "R" + hashlib.sha256(f["id"].encode()).hexdigest()[:16]
+        if row_id not in existing:
+            if int(f.get("size", 0) or 0) > MAX_RECORD:
+                raise UploadError(400, "大きすぎる入力内容があるため、移せませんでした。")
+            record = download_json(f["id"])
+            props = f.get("appProperties", {})
+            record.setdefault("code", props.get("kabaCode", ""))
+            record.setdefault("submitted", f.get("createdTime", ""))
+            append_record(form_id, form, row_id, record, props.get("kabaBatch"))
+        trash_file(f["id"])
+        moved += 1
+    log.info("migrated form=%s moved=%d", form_id, moved)
+    return {"moved": moved, "remaining": len(legacy) - moved}
 
 
 def find_submission(file_id):
@@ -1099,6 +1323,10 @@ def find_submission(file_id):
 
 
 def handle_submissions_get(body):
+    if ROW_ID_RE.match(str(body.get("id"))):
+        sid, n = find_row(check_form_id(body.get("formId")), body["id"])
+        record, _ = row_record(sid, sheets_values(sid, MAIN_SHEET, f"A{n}:Z{n}")[0])
+        return {"record": record}
     f = find_submission(body.get("id"))
     if int(f.get("size", 0)) > MAX_RECORD:
         raise UploadError(400, "ファイルが大きすぎます。")
@@ -1106,10 +1334,17 @@ def handle_submissions_get(body):
 
 
 def handle_submissions_remove(body):
-    """ドライブのゴミ箱に移す（ゴミ箱からは30日後に完全に削除される）。一緒に送られたファイルも移す"""
-    f = find_submission(body.get("id"))
-    trash_file(f["id"])
-    batch = f.get("appProperties", {}).get("kabaBatch")
+    """入力内容を削除する。スプレッドシートの行は消し（版の履歴からは戻せる）、
+    移し替える前の JSON はドライブのゴミ箱に移す（30日後に完全に削除される）。一緒に送られたファイルはゴミ箱へ"""
+    if ROW_ID_RE.match(str(body.get("id"))):
+        sid, n = find_row(check_form_id(body.get("formId")), body["id"])
+        row = sheets_values(sid, MAIN_SHEET, f"A{n}:E{n}")[0]
+        batch = row[4] if len(row) > 4 else ""
+        sheets_delete_row(sid, 0, n)
+    else:
+        f = find_submission(body.get("id"))
+        trash_file(f["id"])
+        batch = f.get("appProperties", {}).get("kabaBatch")
     if batch and BATCH_RE.match(batch):
         for attached in list_by_property("kabaBatch", batch):
             if "kabaFileOf" in attached.get("appProperties", {}):
@@ -1164,6 +1399,7 @@ STAFF_ROUTES = {
     "/submissions/get": handle_submissions_get,
     "/submissions/remove": handle_submissions_remove,
     "/submissions/file": handle_submissions_file,
+    "/submissions/migrate": handle_submissions_migrate,
     "/office/get": handle_office_get,
     "/office/submit": handle_office_submit,
     "/office/file-session": handle_office_file_session,

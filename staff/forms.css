@@ -146,6 +146,8 @@
 #request-detail { margin-bottom: 16px; }
 #requests-close, #sub-close { margin-top: 16px; }
 .sub-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+.sub-migrate { margin: 0 0 16px; padding: 12px 16px; border-left: 4px solid var(--accent); background: #f6f2ea; }
+.sub-migrate p { margin: 0 0 8px; }
 .sub-view { margin-top: 20px; padding: 16px; border: 2px solid var(--navy); }
 .sub-view h3 { margin: 0 0 8px; font-size: 1.05rem; }
 .sub-view table { width: 100%; border-collapse: collapse; }
