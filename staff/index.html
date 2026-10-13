@@ -497,6 +497,7 @@
         <h1 class="section-title">スケジュール</h1>
         <section class="staff-card">
           <p id="schedule-locked" class="key-warning">予定は暗号化しています。見る・直すには、上の欄で鍵を開いてください。</p>
+          <p id="schedule-keynote" class="hint" hidden>Google カレンダーの予定を表示しています。顧問先・メモ、期限・TODO も出すには、上の欄で鍵を開いてください。</p>
           <div id="schedule-body" hidden>
             <div class="schedule-toolbar">
               <div class="schedule-nav">
@@ -518,6 +519,7 @@
             <form id="schedule-form" class="register-edit todo-form" hidden>
               <h3 id="schedule-form-title"></h3>
               <label>件名 <span class="required-mark">必須</span><input id="schedule-form-name" maxlength="200" required></label>
+              <p id="schedule-form-where" class="hint"></p>
               <div class="todo-form-row">
                 <label>日付 <input id="schedule-form-date" type="date" required></label>
                 <label class="check-line"><input type="checkbox" id="schedule-form-allday"> 終日</label>
@@ -527,7 +529,7 @@
               </div>
               <label>場所<input id="schedule-form-place" maxlength="200"></label>
               <fieldset class="schedule-members"><legend>参加する職員</legend><div id="schedule-form-members"></div></fieldset>
-              <label>メモ<textarea id="schedule-form-memo" rows="2" maxlength="2000"></textarea></label>
+              <label>メモ（Google カレンダーには送りません）<textarea id="schedule-form-memo" rows="2" maxlength="2000"></textarea></label>
               <p id="schedule-form-meta" class="hint"></p>
               <div class="ed-actions">
                 <button type="submit" class="button">保存</button>
@@ -535,6 +537,20 @@
                 <button type="button" id="schedule-form-cancel" class="button button-outline">閉じる</button>
               </div>
             </form>
+          </div>
+        </section>
+
+        <section class="staff-card">
+          <h2>Google カレンダー</h2>
+          <p id="gcal-status" class="hint"></p>
+          <div id="gcal-settings" hidden>
+            <p class="hint">事務所内ページに出すカレンダーと、事務所内ページで作った予定を入れるカレンダーを選びます。<strong>選んだカレンダーの予定は、事務所内ページにログインできる職員全員に見えます。個人の予定のカレンダーは選ばないでください。</strong>件名・日時・場所・参加者は Google カレンダーに入り、顧問先とメモは暗号化して事務所の側に残します。</p>
+            <ul id="gcal-calendars" class="register-history"></ul>
+            <label class="activities-filter">予定を入れるカレンダー <select id="gcal-write"></select></label>
+            <div class="ed-actions">
+              <button type="button" id="gcal-save" class="button">設定を保存</button>
+              <button type="button" id="gcal-push" class="button button-outline" hidden>まだ Google にない予定を送る</button>
+            </div>
           </div>
         </section>
       </div>
@@ -575,7 +591,7 @@
   <script src="/staff/activities.js?v=20261013-1"></script>
   <script src="/staff/todo.js?v=20261013-1"></script>
   <script src="/staff/deadline.js?v=20261013-1"></script>
-  <script src="/staff/schedule.js?v=20261013-1"></script>
+  <script src="/staff/schedule.js?v=20261013-2"></script>
   <script src="/staff/claude.js?v=20261013-1"></script>
   <script src="/staff/app.js?v=20261013-1"></script>
 </body>

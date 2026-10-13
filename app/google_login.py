@@ -70,8 +70,11 @@ def main():
         data = {}
     if not r.ok or "refresh_token" not in data:
         sys.exit(f"ログイン情報を取得できませんでした（{data.get('error_description') or data.get('error') or r.status_code}）")
-    if SCOPES[0] not in data.get("scope", "").split():
+    granted = data.get("scope", "").split()
+    if SCOPES[0] not in granted:
         sys.exit("ドライブへのアクセスが許可されていません。許可の画面でチェックを入れて、やり直してください")
+    if SCOPES[1] not in granted:
+        print("注意: Google カレンダーは許可されていません（ドライブだけで保存します）。カレンダーとつなぐには、チェックを入れてやり直してください")
 
     save({
         "type": "authorized_user",

@@ -14,6 +14,7 @@ import threading
 import unittest
 from http.server import ThreadingHTTPServer
 from unittest import mock
+from urllib.parse import unquote
 
 _config_dir = tempfile.TemporaryDirectory()
 os.environ["UPLOAD_CONFIG_DIR"] = _config_dir.name
@@ -1087,6 +1088,86 @@ class FormTest(unittest.TestCase):
         self.assertEqual(self.staff_as("/store/save", {"store": "schedule", "encrypted": self.encrypted()})[0], 200)
         self.assertEqual(next(iter(self.sheets.books.values()))["name"], "事務所の管理_スケジュール")
         self.assertEqual(len(self.staff_as("/store/list", {"store": "schedule"})[1]["items"]), 1)
+
+    # --- Google カレンダー ---
+
+    def fake_calendar(self):
+        """Google カレンダーの代わり（カレンダー → 予定）"""
+        cals = {"primary@example.com": {}, "work@group.calendar.google.com": {}, "private@example.com": {}}
+        calls = []
+
+        def call(method, path, **kw):
+            calls.append((method, path, kw))
+            parts = path.split("/")
+            if path == "/users/me/calendarList":
+                return {"items": [{"id": c, "summary": c.split("@")[0], "primary": c.startswith("primary"), "accessRole": "owner"}
+                                  for c in cals]}
+            cal = unquote(parts[2]) if len(parts) > 2 else ""
+            if method == "GET" and len(parts) == 4:
+                return {"items": list(cals[cal].values())}
+            if method == "POST":
+                eid = f"evt{len(calls):05d}"
+                cals[cal][eid] = {"id": eid, **kw["json"], "updated": "2026-10-13T00:00:00Z"}
+                return cals[cal][eid]
+            eid = parts[4]
+            if eid not in cals[cal]:
+                raise server.UploadError(404, "Google カレンダーの予定が見つかりません。")
+            if method == "GET":
+                return cals[cal][eid]
+            if method == "PATCH":
+                cals[cal][eid].update(kw["json"])
+                return cals[cal][eid]
+            del cals[cal][eid]
+            return {}
+        return cals, calls, call
+
+    def test_calendar(self):
+        cals, calls, call = self.fake_calendar()
+        with mock.patch.object(server, "calendar_call", call):
+            status, data = self.staff_as("/calendar/calendars", {})
+            self.assertEqual((len(data["calendars"]), data["settings"]), (3, {"show": [], "write": ""}))
+            body = {"title": "ダミーの打ち合わせ", "date": "2026-10-15", "start": "14:00", "end": "15:00",
+                    "place": "ダミー会議室", "participants": "田中・佐藤"}
+            self.assertEqual(self.staff_as("/calendar/save", body)[0], 400)   # 書き込むカレンダーが未設定
+            settings = {"show": ["work@group.calendar.google.com"], "write": "primary@example.com"}
+            self.assertEqual(self.staff_as("/settings/save", {"key": "calendar", "value": settings})[0], 200)
+            status, data = self.staff_as("/calendar/save", body)
+            self.assertEqual(status, 200, data)
+            event = data["event"]
+            self.assertEqual((event["calendarId"], event["date"], event["start"], event["end"], event["participants"]),
+                             ("primary@example.com", "2026-10-15", "14:00", "15:00", "田中・佐藤"))
+            stored = cals["primary@example.com"][event["eventId"]]
+            self.assertEqual(stored["start"], {"dateTime": "2026-10-15T14:00:00+09:00", "timeZone": "Asia/Tokyo"})
+            # Google 側で入れた終日の予定（説明あり）も読める。直しても説明の「参加：」以外は残す
+            cals["work@group.calendar.google.com"]["gcalAllDay1"] = {
+                "id": "gcalAllDay1", "summary": "ダミーの研修", "start": {"date": "2026-10-16"}, "end": {"date": "2026-10-18"},
+                "description": "持ち物：ダミー"}
+            cals["private@example.com"]["secret1"] = {"id": "secret1", "summary": "個人の予定", "start": {"date": "2026-10-16"},
+                                                      "end": {"date": "2026-10-17"}}
+            status, data = self.staff_as("/calendar/events", {"from": "2026-10-01", "to": "2026-10-31"})
+            titles = {e["title"]: e for e in data["events"]}
+            self.assertEqual(set(titles), {"ダミーの打ち合わせ", "ダミーの研修"})   # 選んでいないカレンダーは出さない
+            self.assertEqual((titles["ダミーの研修"]["allDay"], titles["ダミーの研修"]["endDate"]), (True, "2026-10-17"))
+            edit = {"calendarId": "work@group.calendar.google.com", "eventId": "gcalAllDay1", "title": "ダミーの研修（直した）",
+                    "date": "2026-10-16", "allDay": True, "participants": "田中"}
+            self.assertEqual(self.staff_as("/calendar/save", edit)[0], 200)
+            self.assertEqual(cals["work@group.calendar.google.com"]["gcalAllDay1"]["description"], "参加：田中\n持ち物：ダミー")
+            # 選んでいないカレンダーの予定は、直せない・消せない
+            self.assertEqual(self.staff_as("/calendar/save", {**edit, "calendarId": "private@example.com", "eventId": "secret1"})[0], 404)
+            self.assertEqual(self.staff_as("/calendar/remove", {"calendarId": "private@example.com", "eventId": "secret1"})[0], 404)
+            self.assertEqual(self.staff_as("/calendar/remove", {"calendarId": "primary@example.com", "eventId": event["eventId"]})[0], 200)
+            self.assertEqual(cals["primary@example.com"], {})
+            for bad in ({"date": "10/15"}, {"start": "25:00"}, {"start": "15:00", "end": "14:00"}, {"title": ""}):
+                self.assertEqual(self.staff_as("/calendar/save", {**body, **bad})[0], 400, bad)
+            self.assertEqual(self.post("/calendar/events", {"from": "2026-10-01", "to": "2026-10-31"})[0], 404)
+
+    def test_calendar_not_connected(self):
+        response = mock.Mock(status_code=403, text="insufficient scopes", content=b"{}")
+        with mock.patch.object(server.requests, "request", return_value=response), \
+                mock.patch.object(server, "auth_headers", return_value={}):
+            status, data = self.post("/calendar/calendars", {}, "staff")
+        self.assertEqual(status, 503)
+        self.assertIn("つながっていません", data["error"])
 
     def test_members(self):
         status, data = self.staff_as("/members/list", {}, user="tanaka")

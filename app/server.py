@@ -75,7 +75,9 @@ ALLOWED_TYPES = {
 DRIVE_API = "https://www.googleapis.com/drive/v3/files"
 DRIVE_UPLOAD_API = "https://www.googleapis.com/upload/drive/v3/files"
 SHEETS_API = "https://sheets.googleapis.com/v4/spreadsheets"
-SCOPES = ["https://www.googleapis.com/auth/drive.file"]
+CALENDAR_API = "https://www.googleapis.com/calendar/v3"
+# ドライブはアプリが作ったファイルだけ（drive.file）。カレンダーは所長の判断で、予定の読み書き（calendar）も使う
+SCOPES = ["https://www.googleapis.com/auth/drive.file", "https://www.googleapis.com/auth/calendar"]
 JST = timezone(timedelta(hours=9))
 TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{20,128}$")
 FILE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{10,200}$")
@@ -211,7 +213,8 @@ def auth_headers():
     global _creds
     with _creds_lock:
         if _creds is None:
-            _creds = Credentials.from_authorized_user_file(TOKEN_FILE, scopes=SCOPES)
+            # 権限は指定しない（ログインのときに許可された権限のまま使う。カレンダーを許可する前でもドライブは使える）
+            _creds = Credentials.from_authorized_user_file(TOKEN_FILE)
         if not _creds.valid:
             _creds.refresh(GoogleAuthRequest())
         return {"Authorization": f"Bearer {_creds.token}"}
@@ -410,6 +413,19 @@ def sheets_delete_row(sid, sheet_id, row_number):
     """行を消す（row_number は1から数えた行の番号）"""
     sheets_call("POST", f"/{sid}:batchUpdate", json={"requests": [{"deleteDimension": {"range": {
         "sheetId": sheet_id, "dimension": "ROWS", "startIndex": row_number - 1, "endIndex": row_number}}}]})
+
+
+# --- Google カレンダー（所長のカレンダー。どれを事務所内ページに出し、どれに書くかは設定で選ぶ） ---
+
+def calendar_call(method, path, **kw):
+    r = requests.request(method, CALENDAR_API + path, headers=auth_headers(), timeout=30, **kw)
+    if r.status_code in (401, 403):
+        log.warning("calendar api refused status=%d %s", r.status_code, r.text[:200])
+        raise UploadError(503, "Google カレンダーとはまだつながっていません（カレンダーの許可が必要です）。")
+    if r.status_code == 404:
+        raise UploadError(404, "Google カレンダーの予定が見つかりません。")
+    r.raise_for_status()
+    return r.json() if r.content else {}
 
 
 # --- 顧問先の対応表（URLの鍵 → ドライブのフォルダ） ---
@@ -1223,7 +1239,138 @@ def check_deadline_settings(value):
     return result
 
 
-SETTING_CHECKS = {"deadline": check_deadline_settings}
+CALENDAR_ID_RE = re.compile(r"^[^\s/?#]{1,200}$")
+
+
+def check_calendar_settings(value):
+    if not isinstance(value, dict):
+        raise UploadError(400, "設定の形式が正しくありません。")
+    show = value.get("show") or []
+    write = value.get("write") or ""
+    if not isinstance(show, list) or len(show) > 20 or not all(isinstance(c, str) and CALENDAR_ID_RE.match(c) for c in show):
+        raise UploadError(400, "カレンダーが正しくありません。")
+    if write and (not isinstance(write, str) or not CALENDAR_ID_RE.match(write)):
+        raise UploadError(400, "カレンダーが正しくありません。")
+    return {"show": list(dict.fromkeys(show)), "write": write}
+
+
+SETTING_CHECKS = {"deadline": check_deadline_settings, "calendar": check_calendar_settings}
+
+
+# --- Google カレンダーの予定（件名・日時・場所・参加者だけ。顧問先とメモは暗号化して事務所側に残す） ---
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+PARTICIPANTS_PREFIX = "参加："
+EVENT_ID_RE = re.compile(r"^[A-Za-z0-9_]{5,1024}$")
+
+
+def calendar_settings():
+    return load_json(SETTINGS_FILE).get("calendar") or {"show": [], "write": ""}
+
+
+def allowed_calendars():
+    s = calendar_settings()
+    return set(s.get("show", [])) | ({s["write"]} if s.get("write") else set())
+
+
+def handle_calendar_calendars(body):
+    data = calendar_call("GET", "/users/me/calendarList", params={"minAccessRole": "reader"})
+    return {"calendars": [{"id": c["id"], "summary": c.get("summaryOverride") or c.get("summary", ""),
+                           "primary": c.get("primary", False), "accessRole": c.get("accessRole", ""),
+                           "color": c.get("backgroundColor", "")} for c in data.get("items", [])],
+            "settings": calendar_settings()}
+
+
+def event_view(calendar_id, e):
+    start, end = e.get("start", {}), e.get("end", {})
+    view = {"calendarId": calendar_id, "eventId": e["id"], "title": e.get("summary", ""), "place": e.get("location", ""),
+            "link": e.get("htmlLink", ""), "updated": e.get("updated", ""), "participants": ""}
+    for line in (e.get("description") or "").splitlines():
+        if line.startswith(PARTICIPANTS_PREFIX):
+            view["participants"] = line[len(PARTICIPANTS_PREFIX):].strip()
+    if "date" in start:
+        last = (datetime.fromisoformat(end.get("date", start["date"])) - timedelta(days=1)).date().isoformat()
+        view.update({"allDay": True, "date": start["date"], "endDate": max(last, start["date"]), "start": "", "end": ""})
+    else:
+        s = datetime.fromisoformat(start["dateTime"]).astimezone(JST)
+        t = datetime.fromisoformat(end.get("dateTime", start["dateTime"])).astimezone(JST)
+        view.update({"allDay": False, "date": s.date().isoformat(), "endDate": t.date().isoformat(),
+                     "start": f"{s:%H:%M}", "end": f"{t:%H:%M}"})
+    return view
+
+
+def handle_calendar_events(body):
+    """設定で選んだカレンダーの予定（from〜to の日付）"""
+    date_from, date_to = body.get("from"), body.get("to")
+    if not (isinstance(date_from, str) and isinstance(date_to, str) and DATE_RE.match(date_from) and DATE_RE.match(date_to)):
+        raise UploadError(400, "日付が正しくありません。")
+    time_max = (datetime.fromisoformat(date_to) + timedelta(days=1)).date().isoformat()
+    events = []
+    for cal in sorted(allowed_calendars()):
+        data = calendar_call("GET", f"/calendars/{quote(cal, safe='')}/events", params={
+            "timeMin": f"{date_from}T00:00:00+09:00", "timeMax": f"{time_max}T00:00:00+09:00",
+            "singleEvents": "true", "orderBy": "startTime", "maxResults": 2500})
+        events += [event_view(cal, e) for e in data.get("items", []) if e.get("status") != "cancelled"]
+    return {"events": events, "settings": calendar_settings()}
+
+
+def event_body(body):
+    title = text(body.get("title"), 200, "件名", required=True)
+    date = body.get("date")
+    if not isinstance(date, str) or not DATE_RE.match(date):
+        raise UploadError(400, "日付が正しくありません。")
+    result = {"summary": title, "location": text(body.get("place", ""), 200, "場所")}
+    if body.get("allDay"):
+        result["start"] = {"date": date}
+        result["end"] = {"date": (datetime.fromisoformat(date) + timedelta(days=1)).date().isoformat()}
+    else:
+        start, end = body.get("start") or "09:00", body.get("end") or ""
+        if not TIME_RE.match(start) or (end and not TIME_RE.match(end)):
+            raise UploadError(400, "時刻が正しくありません。")
+        end = end or f"{min(int(start[:2]) + 1, 23):02d}:{start[3:]}"
+        if end < start:
+            raise UploadError(400, "終了の時刻が開始より前です。")
+        result["start"] = {"dateTime": f"{date}T{start}:00+09:00", "timeZone": "Asia/Tokyo"}
+        result["end"] = {"dateTime": f"{date}T{end}:00+09:00", "timeZone": "Asia/Tokyo"}
+    return result, text(body.get("participants", ""), 200, "参加者")
+
+
+def with_participants(description, participants):
+    lines = [line for line in (description or "").splitlines() if not line.startswith(PARTICIPANTS_PREFIX)]
+    if participants:
+        lines.insert(0, PARTICIPANTS_PREFIX + participants)
+    return "\n".join(lines)
+
+
+def handle_calendar_save(body):
+    """予定を Google カレンダーに作る・直す（件名・日時・場所・参加者）。作るときは設定の「書き込むカレンダー」に"""
+    event, participants = event_body(body)
+    event_id = body.get("eventId")
+    if event_id:
+        cal = body.get("calendarId")
+        if cal not in allowed_calendars() or not isinstance(event_id, str) or not EVENT_ID_RE.match(event_id):
+            raise UploadError(404, "Google カレンダーの予定が見つかりません。")
+        path = f"/calendars/{quote(cal, safe='')}/events/{event_id}"
+        current = calendar_call("GET", path)
+        event["description"] = with_participants(current.get("description"), participants)
+        saved = calendar_call("PATCH", path, json=event)
+    else:
+        cal = calendar_settings().get("write")
+        if not cal:
+            raise UploadError(400, "予定を入れる Google カレンダーが設定されていません。")
+        event["description"] = with_participants("", participants)
+        saved = calendar_call("POST", f"/calendars/{quote(cal, safe='')}/events", json=event)
+    log.info("calendar saved staff=%s", staff_name(body))   # 予定の中身は記録に残さない
+    return {"event": event_view(cal, saved)}
+
+
+def handle_calendar_remove(body):
+    cal, event_id = body.get("calendarId"), body.get("eventId")
+    if cal not in allowed_calendars() or not isinstance(event_id, str) or not EVENT_ID_RE.match(event_id):
+        raise UploadError(404, "Google カレンダーの予定が見つかりません。")
+    calendar_call("DELETE", f"/calendars/{quote(cal, safe='')}/events/{event_id}")
+    log.info("calendar removed staff=%s", staff_name(body))
+    return {"ok": True}
 
 
 def handle_settings_get(body):
@@ -1703,6 +1850,10 @@ STAFF_ROUTES = {
     "/members/save": handle_members_save,
     "/settings/get": handle_settings_get,
     "/settings/save": handle_settings_save,
+    "/calendar/calendars": handle_calendar_calendars,
+    "/calendar/events": handle_calendar_events,
+    "/calendar/save": handle_calendar_save,
+    "/calendar/remove": handle_calendar_remove,
     "/office/get": handle_office_get,
     "/office/submit": handle_office_submit,
     "/office/file-session": handle_office_file_session,
@@ -1714,7 +1865,8 @@ STAFF_ROUTES = {
 # 見るだけの API（変更の記録を残さない）
 STAFF_READ_ONLY = {"/clients/list", "/clients/qr", "/forms/list", "/requests/list", "/requests/qr",
                    "/submissions/list", "/office/get", "/unlocks/list", "/register/records", "/register/history",
-                   "/register/activities", "/activities/list", "/store/list", "/members/list", "/settings/get"}
+                   "/register/activities", "/activities/list", "/store/list", "/members/list", "/settings/get",
+                   "/calendar/calendars", "/calendar/events"}
 
 
 class Handler(BaseHTTPRequestHandler):
