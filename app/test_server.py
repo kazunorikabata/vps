@@ -1082,6 +1082,12 @@ class FormTest(unittest.TestCase):
                     {"key": "deadline", "value": {"monthField": "A-1"}}, {"key": "deadline", "value": "x"}):
             self.assertIn(self.staff_as("/settings/save", bad)[0], (400, 404), bad)
 
+    def test_schedule_store(self):
+        self.set_key()
+        self.assertEqual(self.staff_as("/store/save", {"store": "schedule", "encrypted": self.encrypted()})[0], 200)
+        self.assertEqual(next(iter(self.sheets.books.values()))["name"], "事務所の管理_スケジュール")
+        self.assertEqual(len(self.staff_as("/store/list", {"store": "schedule"})[1]["items"]), 1)
+
     def test_members(self):
         status, data = self.staff_as("/members/list", {}, user="tanaka")
         self.assertEqual(data, {"members": [], "me": "tanaka"})

@@ -135,6 +135,11 @@ async function openLedgerEdit(code) {
     empty.textContent = '対応の記録を読み込めませんでした。';
     empty.hidden = false;
   });
+  await loadLedgerEvents().catch(() => {
+    const empty = document.getElementById('register-events-empty');
+    empty.textContent = '予定を読み込めませんでした。';
+    empty.hidden = false;
+  });
   await loadLedgerDeadlines().catch(() => {
     const empty = document.getElementById('register-deadlines-empty');
     empty.textContent = '期限を読み込めませんでした。';
@@ -249,6 +254,24 @@ function showInPanel(heading, fields, answers, layout) {
   view.replaceChildren(title, grid, close);
   view.hidden = false;
   view.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// --- これからの予定（schedule.js） ---
+
+async function loadLedgerEvents() {
+  const list = await clientEvents(ledgerCode);
+  document.getElementById('register-events').replaceChildren(...list.map((e) => {
+    const v = e.value;
+    const li = document.createElement('li');
+    const span = document.createElement('span');
+    const time = v.allDay ? '終日' : `${v.start || ''}${v.end ? `〜${v.end}` : ''}`;
+    span.textContent = `${dueLabel(v.date)} ${time}　${v.title}${v.place ? `（${v.place}）` : ''}`;
+    li.append(span);
+    return li;
+  }));
+  const empty = document.getElementById('register-events-empty');
+  empty.textContent = '予定はありません。';
+  empty.hidden = list.length > 0;
 }
 
 // --- 期限（deadline.js）。済んでいないものを期限日の順に ---

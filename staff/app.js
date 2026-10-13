@@ -29,6 +29,7 @@ function route() {
   if (r.kind) setKind(r.kind, arg ? decodeURIComponent(arg) : undefined);
   if (key === 'todo') run(startTodo);
   if (key === 'deadline') run(startDeadline);
+  if (key === 'schedule') run(startSchedule);
   window.scrollTo({ top: 0 });
 }
 
@@ -43,6 +44,7 @@ function keyOpened() {
   if (name === 'register') registerKeyChanged();
   if (name === 'todo') run(loadTodos);
   if (name === 'deadline') run(loadDeadlines);
+  if (name === 'schedule') run(loadEvents);
 }
 
 window.addEventListener('hashchange', route);

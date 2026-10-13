@@ -108,7 +108,7 @@ REGISTERS_NAME = "顧客台帳"
 MEMBERS_FILE = os.path.join(DATA_DIR, "staff-members.json")   # 職員の一覧（事務所内ページのID と表示名。TODO の担当に使う）
 # 事務所の管理（TODO など）：1件ずつ暗号化して、「事務所の記録」フォルダのスプレッドシートに入れる。
 # 直すたびに行を足し、項目の番号ごとにいちばん新しい行が今の内容（前の行は履歴）。削除も「削除」の行を足す
-STORES = {"todo": "TODO", "deadline": "期限"}
+STORES = {"todo": "TODO", "deadline": "期限", "schedule": "スケジュール"}
 SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")   # 事務所内ページの設定（期限の計算に使う台帳の項目など。秘密ではない）
 ITEM_ID_RE = re.compile(r"^T[0-9a-f]{12}$")
 STORE_HEADER = ["番号", "保存日時", "項目の番号", "保存した職員", "削除", "", "暗号化の鍵", "包んだ鍵", "iv",

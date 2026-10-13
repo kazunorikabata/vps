@@ -171,6 +171,34 @@
 .todo-table tr.is-done td.ops { text-decoration: none; }
 .todo-priority-high { color: #b3261e; font-weight: 700; }
 
+/* スケジュール */
+.schedule-toolbar { display: flex; flex-wrap: wrap; gap: 10px 20px; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.schedule-nav, .schedule-options { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
+.schedule-options label { font-weight: 700; }
+.schedule-options select { padding: 6px 8px; border: 1px solid var(--line); font-family: inherit; }
+.schedule-title { font-family: var(--serif); font-size: 1.15rem; color: var(--navy); }
+.schedule-legend span { display: inline-block; margin-right: 10px; padding: 0 6px; }
+.sch-event { background: #e6ecf5; border-left: 3px solid var(--navy); }
+.sch-deadline { background: #fdf0dc; border-left: 3px solid #c77700; }
+.sch-todo { background: #e5f2e8; border-left: 3px solid #2e6b3a; }
+.schedule-grid { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.schedule-grid th { padding: 6px; font-size: 0.85rem; text-align: center; }
+.schedule-grid td { height: 110px; padding: 4px; vertical-align: top; border: 1px solid var(--line); background: #fff; }
+.schedule-grid td.is-other { background: #faf8f4; color: #aaa; }
+.schedule-grid td.is-today { outline: 2px solid var(--navy); outline-offset: -2px; }
+.schedule-grid .sch-sat { color: #2457a6; }
+.schedule-grid .sch-sun { color: #b3261e; }
+.sch-day { display: block; width: 100%; padding: 0 2px; background: none; border: 0; font-family: inherit; font-weight: 700; text-align: left; cursor: pointer; color: inherit; }
+.sch-item { display: block; width: 100%; margin: 2px 0; padding: 1px 4px; border: 0; font-family: inherit; font-size: 0.78rem; text-align: left; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; cursor: pointer; color: #222; }
+.schedule-week td { height: 260px; }
+.schedule-list { margin: 0; padding: 0; list-style: none; }
+.schedule-list > li { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.schedule-list .sch-date { font-weight: 700; }
+.schedule-list .sch-item { white-space: normal; font-size: 0.9rem; }
+.schedule-members { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 8px 12px; border: 1px solid var(--line); }
+.schedule-members legend { font-weight: 700; }
+.schedule-members > div { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+
 /* どの画面でも上に出す、鍵を開く欄 */
 .keybar { margin: 0 0 24px; padding: 12px 16px; background: #fff; border: 1px solid var(--line); }
 .keybar .key-loaded { margin: 0 0 8px; }
