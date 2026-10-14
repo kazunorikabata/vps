@@ -9,7 +9,7 @@ const unlockOpen = document.getElementById('unlock-open');
 const unlockAdd = document.getElementById('unlock-add');
 let unlocks = [];
 
-// 一覧の読み込み（loadUnlocks）は、forms.js が入力ページの一覧のあとに呼ぶ
+// 一覧の読み込み（loadUnlocks）は、app.js が最初に呼ぶ
 
 async function loadUnlocks() {
   unlocks = (await api('unlocks/list')).unlocks;
@@ -59,6 +59,18 @@ unlockOpen.addEventListener('submit', (event) => {
 
 document.getElementById('unlock-add-show').addEventListener('click', () => { unlockAdd.hidden = !unlockAdd.hidden; });
 
+// 手順を3つに分ける（Face ID・キーの操作は、ボタンを押した直後でないと Safari が止めるため）
+//   1. 「次へ」：鍵のファイルを開いて確かめる（秘密鍵の中身はこのページの中だけに一時的に置く）
+//   2. 「Face ID（キー）で登録する」：登録し、できればそのまま秘密を取り出す
+//   3. 取り出せなかった端末だけ「確認のため、もう一度」：秘密を取り出す
+let pendingUnlock = null;   // { label, kind, pkcs8, fingerprint, pass, id }
+
+function clearPendingUnlock() {
+  if (pendingUnlock) pendingUnlock.pkcs8.fill(0);
+  pendingUnlock = null;
+  document.getElementById('unlock-steps').hidden = true;
+}
+
 unlockAdd.addEventListener('submit', (event) => {
   event.preventDefault();
   const label = document.getElementById('unlock-label').value.trim();
@@ -71,6 +83,7 @@ unlockAdd.addEventListener('submit', (event) => {
   if (pass1.value !== pass2.value) return showMessage('確認用のパスワードが一致しません', 'error');
   if (!webauthnSupported()) return showMessage('このブラウザでは登録できません。PC は Chrome か Edge、iPhone は Safari を使ってください', 'error');
   run(async () => {
+    clearPendingUnlock();
     let data;
     try {
       data = JSON.parse(await file.text());
@@ -78,25 +91,59 @@ unlockAdd.addEventListener('submit', (event) => {
       throw new Error('鍵のファイルではありません');
     }
     const { pkcs8, fingerprint } = await FormCrypto.exportFromFile(data, filePass.value);
-    try {
-      if (!registeredKey || fingerprint !== registeredKey.fingerprint) {
-        throw new Error('登録済みの鍵とは別の鍵のファイルです。今の鍵のファイルを選んでください');
-      }
-      showMessage(kind === 'passkey' ? 'Face ID で確認してください' : 'セキュリティキーを差して、触れてください', 'ok');
-      const id = await createCredential(kind, label);
-      showMessage(kind === 'passkey' ? '確認のため、もう一度 Face ID で確認してください' : '確認のため、もう一度キーに触れてください', 'ok');
-      const { prf } = await getPrf([id]);
-      const sealed = await FormCrypto.sealForUnlock(pkcs8, prf, pass1.value);
-      await api('unlocks/add', { id, label, kind, fingerprint, ...sealed });
-    } finally {
+    if (!registeredKey || fingerprint !== registeredKey.fingerprint) {
       pkcs8.fill(0);
+      throw new Error('登録済みの鍵とは別の鍵のファイルです。今の鍵のファイルを選んでください');
     }
-    unlockAdd.reset();
-    unlockAdd.hidden = true;
-    await loadUnlocks();
-    showMessage(`「${label}」を登録しました。これからは、このキー（iPhone）とパスワードで鍵を開けます`, 'ok');
+    pendingUnlock = { label, kind, pkcs8, fingerprint, pass: pass1.value };
+    filePass.value = '';
+    document.getElementById('unlock-steps-text').textContent = kind === 'passkey'
+      ? '鍵のファイルを確かめました。下のボタンを押して、Face ID で登録してください。'
+      : '鍵のファイルを確かめました。セキュリティキーを差してから、下のボタンを押して、キーに触れてください。';
+    document.getElementById('unlock-create').hidden = false;
+    document.getElementById('unlock-confirm').hidden = true;
+    document.getElementById('unlock-steps').hidden = false;
+    showMessage('鍵のファイルを確かめました。続けて登録してください', 'ok');
   });
 });
+
+document.getElementById('unlock-steps-cancel').addEventListener('click', () => {
+  clearPendingUnlock();
+  showMessage('登録をやめました', 'ok');
+});
+
+document.getElementById('unlock-create').addEventListener('click', () => run(async () => {
+  if (!pendingUnlock) throw new Error('最初からやり直してください');
+  const { id, prf } = await createCredential(pendingUnlock.kind, pendingUnlock.label);
+  pendingUnlock.id = id;
+  if (prf) {
+    await finishUnlock(prf);
+    return;
+  }
+  // 登録のときに秘密を取り出せない端末は、もう一度確認してもらう
+  document.getElementById('unlock-steps-text').textContent = pendingUnlock.kind === 'passkey'
+    ? '登録できました。仕上げに、下のボタンを押して、もう一度 Face ID で確認してください。'
+    : '登録できました。仕上げに、下のボタンを押して、もう一度キーに触れてください。';
+  document.getElementById('unlock-create').hidden = true;
+  document.getElementById('unlock-confirm').hidden = false;
+}));
+
+document.getElementById('unlock-confirm').addEventListener('click', () => run(async () => {
+  if (!pendingUnlock || !pendingUnlock.id) throw new Error('最初からやり直してください');
+  const { prf } = await getPrf([pendingUnlock.id]);
+  await finishUnlock(prf);
+}));
+
+async function finishUnlock(prf) {
+  const { label, kind, pkcs8, fingerprint, pass, id } = pendingUnlock;
+  const sealed = await FormCrypto.sealForUnlock(pkcs8, prf, pass);
+  await api('unlocks/add', { id, label, kind, fingerprint, ...sealed });
+  clearPendingUnlock();
+  unlockAdd.reset();
+  unlockAdd.hidden = true;
+  await loadUnlocks();
+  showMessage(`「${label}」を登録しました。これからは、このキー（iPhone）とパスワードで鍵を開けます`, 'ok');
+}
 
 // --- WebAuthn ---
 
@@ -112,7 +159,8 @@ async function createCredential(kind, label) {
         residentKey: kind === 'passkey' ? 'required' : 'discouraged',
         userVerification: 'required',
       },
-      extensions: { prf: {} },
+      // 登録と同時に秘密を取り出せる端末では、ここで受け取る（できない端末は、あとでもう一度確認する）
+      extensions: { prf: { eval: { first: PRF_INPUT } } },
       timeout: 120000,
     },
   }));
@@ -120,7 +168,7 @@ async function createCredential(kind, label) {
   if (!prf || prf.enabled === false) {
     throw new Error('このキー（端末）は、鍵を開く機能に対応していません。FIDO2（hmac-secret）対応のセキュリティキーか、iOS 18 以降の iPhone を使ってください');
   }
-  return toB64url(cred.rawId);
+  return { id: toB64url(cred.rawId), prf: prf.results && prf.results.first ? prf.results.first : null };
 }
 
 // キーから秘密を取り出す。ids のどれか（登録済みのキー・iPhone）で応じてもらう

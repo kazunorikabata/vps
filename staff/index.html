@@ -11,9 +11,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&family=Noto+Serif+JP:wght@500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
-  <link rel="stylesheet" href="/staff/staff.css?v=20261009-7">
-  <link rel="stylesheet" href="/form/layout.css?v=20261009-7">
-  <link rel="stylesheet" href="/staff/forms.css?v=20261009-7">
+  <link rel="stylesheet" href="/staff/staff.css?v=20261014-1">
+  <link rel="stylesheet" href="/form/layout.css?v=20261014-1">
+  <link rel="stylesheet" href="/staff/forms.css?v=20261014-1">
 </head>
 <body>
   <!-- 事務所内ページは、この1つのページで画面を切り替える（app.js）。鍵はこのページの中だけに置くので、
@@ -347,7 +347,14 @@
           <label>鍵のファイルのパスワード <input type="password" id="unlock-file-pass" required autocomplete="off"></label>
           <label>この開け方で使うパスワード（12文字以上） <input type="password" id="unlock-pass1" minlength="12" required autocomplete="new-password"></label>
           <label>（確認） <input type="password" id="unlock-pass2" minlength="12" required autocomplete="new-password"></label>
-          <button type="submit" class="button">登録する</button>
+          <button type="submit" class="button">次へ</button>
+          <!-- Face ID・キーの操作は、ボタンを押した直後でないと Safari が止めるので、手順を分ける -->
+          <div id="unlock-steps" class="unlock-steps" hidden>
+            <p id="unlock-steps-text"></p>
+            <button type="button" id="unlock-create" class="button">Face ID（キー）で登録する</button>
+            <button type="button" id="unlock-confirm" class="button" hidden>確認のため、もう一度</button>
+            <button type="button" id="unlock-steps-cancel" class="button button-outline">やめる</button>
+          </div>
           <p class="hint">登録のときだけ、今の鍵のファイルを使います。iPhone で登録するときは、鍵のファイルを一時的に iPhone に移し、登録が終わったら iPhone から削除してください。登録したキーやiPhoneをなくしたときは、ここで削除してください。</p>
         </form>
         </section>
@@ -521,19 +528,19 @@
     </div>
   </footer>
 
-  <script src="/form/crypto.js?v=20261009-7"></script>
-  <script src="/form/render.js?v=20261009-7"></script>
-  <script src="/form/values.js?v=20261009-7"></script>
-  <script src="/staff/common.js?v=20261009-7"></script>
-  <script src="/staff/staff.js?v=20261009-7"></script>
-  <script src="/staff/forms.js?v=20261009-7"></script>
-  <script src="/staff/form-editor.js?v=20261009-7"></script>
-  <script src="/staff/unlock.js?v=20261009-7"></script>
-  <script src="/staff/register.js?v=20261009-7"></script>
-  <script src="/staff/activities.js?v=20261009-7"></script>
-  <script src="/staff/todo.js?v=20261009-7"></script>
-  <script src="/staff/deadline.js?v=20261009-7"></script>
-  <script src="/staff/claude.js?v=20261009-7"></script>
-  <script src="/staff/app.js?v=20261009-7"></script>
+  <script src="/form/crypto.js?v=20261014-1"></script>
+  <script src="/form/render.js?v=20261014-1"></script>
+  <script src="/form/values.js?v=20261014-1"></script>
+  <script src="/staff/common.js?v=20261014-1"></script>
+  <script src="/staff/staff.js?v=20261014-1"></script>
+  <script src="/staff/forms.js?v=20261014-1"></script>
+  <script src="/staff/form-editor.js?v=20261014-1"></script>
+  <script src="/staff/unlock.js?v=20261014-1"></script>
+  <script src="/staff/register.js?v=20261014-1"></script>
+  <script src="/staff/activities.js?v=20261014-1"></script>
+  <script src="/staff/todo.js?v=20261014-1"></script>
+  <script src="/staff/deadline.js?v=20261014-1"></script>
+  <script src="/staff/claude.js?v=20261014-1"></script>
+  <script src="/staff/app.js?v=20261014-1"></script>
 </body>
 </html>

@@ -21,6 +21,8 @@
 .unlock-open { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin: 0 0 16px; padding: 16px; background: #f6f2ea; }
 .unlock-open label { display: flex; flex-direction: column; gap: 4px; font-weight: 700; }
 .unlock-open .hint { flex-basis: 100%; margin: 0; }
+.unlock-steps { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 8px; padding: 12px; background: #f6f2ea; }
+.unlock-steps p { flex-basis: 100%; margin: 0; font-weight: 700; }
 .check-line { display: inline-flex !important; flex-direction: row !important; align-items: center; gap: 8px; font-weight: 400 !important; }
 .check-line[hidden] { display: none !important; }
 
