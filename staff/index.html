@@ -11,9 +11,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&family=Noto+Serif+JP:wght@500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
-  <link rel="stylesheet" href="/staff/staff.css?v=20261014-1">
-  <link rel="stylesheet" href="/form/layout.css?v=20261014-1">
-  <link rel="stylesheet" href="/staff/forms.css?v=20261014-1">
+  <link rel="stylesheet" href="/staff/staff.css?v=20261014-2">
+  <link rel="stylesheet" href="/form/layout.css?v=20261014-2">
+  <link rel="stylesheet" href="/staff/forms.css?v=20261014-2">
 </head>
 <body>
   <!-- 事務所内ページは、この1つのページで画面を切り替える（app.js）。鍵はこのページの中だけに置くので、
@@ -305,6 +305,7 @@
           <p id="key-status"></p>
           <div class="key-actions">
             <button type="button" id="key-create-show" class="button button-outline">鍵を作る</button>
+            <p id="key-create-locked" class="hint" hidden>鍵を作り直すには、先に上の欄で鍵を開いてください。</p>
           </div>
         <form id="key-create" class="key-form" hidden>
           <p id="key-replace-warning" class="key-warning" hidden>
@@ -528,19 +529,19 @@
     </div>
   </footer>
 
-  <script src="/form/crypto.js?v=20261014-1"></script>
-  <script src="/form/render.js?v=20261014-1"></script>
-  <script src="/form/values.js?v=20261014-1"></script>
-  <script src="/staff/common.js?v=20261014-1"></script>
-  <script src="/staff/staff.js?v=20261014-1"></script>
-  <script src="/staff/forms.js?v=20261014-1"></script>
-  <script src="/staff/form-editor.js?v=20261014-1"></script>
-  <script src="/staff/unlock.js?v=20261014-1"></script>
-  <script src="/staff/register.js?v=20261014-1"></script>
-  <script src="/staff/activities.js?v=20261014-1"></script>
-  <script src="/staff/todo.js?v=20261014-1"></script>
-  <script src="/staff/deadline.js?v=20261014-1"></script>
-  <script src="/staff/claude.js?v=20261014-1"></script>
-  <script src="/staff/app.js?v=20261014-1"></script>
+  <script src="/form/crypto.js?v=20261014-2"></script>
+  <script src="/form/render.js?v=20261014-2"></script>
+  <script src="/form/values.js?v=20261014-2"></script>
+  <script src="/staff/common.js?v=20261014-2"></script>
+  <script src="/staff/staff.js?v=20261014-2"></script>
+  <script src="/staff/forms.js?v=20261014-2"></script>
+  <script src="/staff/form-editor.js?v=20261014-2"></script>
+  <script src="/staff/unlock.js?v=20261014-2"></script>
+  <script src="/staff/register.js?v=20261014-2"></script>
+  <script src="/staff/activities.js?v=20261014-2"></script>
+  <script src="/staff/todo.js?v=20261014-2"></script>
+  <script src="/staff/deadline.js?v=20261014-2"></script>
+  <script src="/staff/claude.js?v=20261014-2"></script>
+  <script src="/staff/app.js?v=20261014-2"></script>
 </body>
 </html>
