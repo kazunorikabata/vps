@@ -26,14 +26,15 @@ function unlockRow(u) {
   const tr = document.createElement('tr');
   const ops = document.createElement('td');
   ops.className = 'ops';
-  const show = () => ops.replaceChildren(
+  // 削除は管理者だけ（サーバーでも確かめる）
+  const show = () => ops.replaceChildren(...(currentUser.admin ? [
     button('削除', () => askConfirm(ops, `「${u.label}」を削除しますか？ このキー（iPhone）では鍵を開けなくなります。`,
       '削除する', async () => {
         await api('unlocks/remove', { id: u.id });
         showMessage(`「${u.label}」を削除しました`, 'ok');
         await loadUnlocks();
       }, show), 'button-danger'),
-  );
+  ] : []));
   show();
   tr.append(cell(u.label), cell(UNLOCK_KINDS[u.kind] || u.kind), cell(u.created), ops);
   return tr;

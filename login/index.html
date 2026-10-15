@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; form-action 'none'; base-uri 'none'; object-src 'none'">
+  <title>事務所内ページのログイン｜蒲田和紀税理士事務所</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&family=Noto+Serif+JP:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="/login/login.css?v=20261014-3">
+</head>
+<body>
+  <!-- 事務所内ページのログイン（職員ごとの YubiKey）。#register=… のときは、キーの登録 -->
+  <header class="site-header">
+    <div class="container header-inner">
+      <a href="/" class="logo">蒲田和紀税理士事務所</a>
+    </div>
+  </header>
+
+  <main class="section">
+    <div class="container login">
+      <h1 id="login-title" class="section-title">事務所内ページ</h1>
+      <p id="login-message" class="login-message" role="status" hidden></p>
+
+      <section id="login-box" class="login-card" hidden>
+        <p>YubiKey を差して（スマホでは本体の上部にかざして）、下のボタンを押してください。キーに触れて、PIN を入れるとログインします。</p>
+        <button type="button" id="login-button" class="login-button">YubiKey でログイン</button>
+      </section>
+
+      <section id="register-box" class="login-card" hidden>
+        <p id="register-who"></p>
+        <label class="login-label">キーの名前（自分で分かるように）<input id="register-label" maxlength="30" placeholder="例：普段用、予備"></label>
+        <p>YubiKey を差してから、下のボタンを押してください。キーに触れて、PIN を入れると登録されます（初めて使うキーでは、PIN を決める画面が出ます）。</p>
+        <button type="button" id="register-button" class="login-button">YubiKey を登録する</button>
+      </section>
+
+      <section id="done-box" class="login-card" hidden>
+        <p id="done-text"></p>
+        <a href="/staff/" class="login-button">事務所内ページへ</a>
+      </section>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p class="footer-staff"><a href="/">ホームページに戻る</a></p>
+      <p><small>&copy; 蒲田和紀税理士事務所</small></p>
+    </div>
+  </footer>
+
+  <script src="/login/login.js?v=20261014-3"></script>
+</body>
+</html>

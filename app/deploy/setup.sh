@@ -36,7 +36,7 @@ id "$SERVICE_USER" >/dev/null 2>&1 || useradd --system --no-create-home --shell 
 
 echo "== 3. プログラムと部品を $APP_DIR に置く"
 install -d -m 755 "$APP_DIR"
-install -m 644 "$SRC/server.py" "$SRC/clients_admin.py" "$SRC/google_login.py" "$SRC/requirements.txt" "$APP_DIR/"
+install -m 644 "$SRC/server.py" "$SRC/clients_admin.py" "$SRC/accounts_admin.py" "$SRC/google_login.py" "$SRC/requirements.txt" "$APP_DIR/"
 [ -x "$APP_DIR/venv/bin/python" ] || python3 -m venv "$APP_DIR/venv"
 "$APP_DIR/venv/bin/pip" install --quiet -r "$APP_DIR/requirements.txt"
 

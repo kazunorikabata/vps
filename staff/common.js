@@ -118,6 +118,11 @@ async function fetchJson(url, body = {}) {
   } catch {
     throw new Error('通信できませんでした。時間をおいて再度お試しください');
   }
+  // ログインが切れていたら、ログインのページへ（ログインしたら、今の画面に戻る）
+  if (res.status === 401 && url.startsWith('/api/staff/')) {
+    location.href = `/login/?next=${encodeURIComponent(location.pathname + location.hash)}`;
+    throw new Error('ログインしてください');
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `エラーが起きました（${res.status}）`);
   return data;

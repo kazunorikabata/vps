@@ -27,6 +27,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import requests
 import segno
+import webauthn
+from webauthn.helpers import base64url_to_bytes, bytes_to_base64url
+from webauthn.helpers.structs import (AttestationConveyancePreference, AuthenticatorAttachment,
+                                      AuthenticatorSelectionCriteria, PublicKeyCredentialDescriptor,
+                                      ResidentKeyRequirement, UserVerificationRequirement)
 from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2.credentials import Credentials
 
@@ -52,7 +57,7 @@ STAFF_PORT = int(os.environ.get("UPLOAD_STAFF_PORT", "8082"))
 MAX_SIZE = 50 * 1024 * 1024
 MAX_BODY = 4096
 # 既定より大きい本文を受け付ける API（nginx の client_max_body_size もあわせる）
-BODY_LIMITS = {"/form/submit": 256 * 1024, "/office/submit": 256 * 1024, "/register/save": 256 * 1024,
+BODY_LIMITS = {"/auth/register/verify": 16 * 1024, "/auth/login/verify": 16 * 1024, "/form/submit": 256 * 1024, "/office/submit": 256 * 1024, "/register/save": 256 * 1024,
                "/store/save": 256 * 1024, "/store/save-many": 256 * 1024, "/members/save": 16 * 1024, "/unlocks/add": 16 * 1024, "/forms/save": 64 * 1024, "/key/set": 8192}
 MAX_RECORD = 512 * 1024   # 事務所内ページで開く入力内容のファイルの大きさの上限
 RATE_LIMIT = 60      # 1つのURLから1時間に受け付ける件数
@@ -105,7 +110,15 @@ ROW_ID_RE = re.compile(r"^R[0-9a-f]{16}$")
 OFFICE_CODE = "事務所"
 REGISTERS_FILE = os.path.join(DATA_DIR, "registers-folder.json")   # 「顧客台帳」フォルダ
 REGISTERS_NAME = "顧客台帳"
-MEMBERS_FILE = os.path.join(DATA_DIR, "staff-members.json")   # 職員の一覧（事務所内ページのID と表示名。TODO の担当に使う）
+MEMBERS_FILE = os.path.join(DATA_DIR, "staff-members.json")   # 職員の一覧（アカウントを作る前の形。TODO の担当に使う）
+# 事務所内ページのログイン：職員ごとのアカウントと、登録した YubiKey（WebAuthn の公開鍵。秘密ではない）
+ACCOUNTS_FILE = os.path.join(DATA_DIR, "staff-accounts.json")
+SESSIONS_FILE = os.path.join(DATA_DIR, "staff-sessions.json")   # ログイン中の印（クッキーの値のハッシュだけを置く）
+RP_ID = os.environ.get("STAFF_RP_ID", "kabaoffice.com")
+RP_NAME = "蒲田和紀税理士事務所 事務所内"
+SESSION_COOKIE = "kaba_staff"
+SESSION_HOURS = 12
+REGISTRATION_HOURS = 24
 # 事務所の管理（TODO など）：1件ずつ暗号化して、「事務所の記録」フォルダのスプレッドシートに入れる。
 # 直すたびに行を足し、項目の番号ごとにいちばん新しい行が今の内容（前の行は履歴）。削除も「削除」の行を足す
 STORES = {"todo": "TODO", "deadline": "期限"}
@@ -1242,13 +1255,333 @@ def handle_settings_save(body):
     return {"settings": settings}
 
 
+# --- 事務所内ページのログイン（職員ごとの YubiKey。WebAuthn） ---
+# ・アカウントは管理者が作り、1回だけ使える登録用の URL（24時間）を職員に渡す。職員はそれを開いてキーを登録する
+# ・最初の管理者と、キーを全部なくしたときは、サーバーで accounts_admin.py を使う
+# ・ログインはキーに触れて PIN を入れる（user verification 必須）。ログイン中の印はクッキー（HttpOnly・Secure・SameSite=Strict）
+# ・nginx は /auth/check でログインを確かめてから事務所内ページを見せる。サーバーでも API ごとに確かめる
+
+_auth_lock = threading.Lock()
+_challenges = {}          # 1回だけ使う確認用の値（5分）
+_login_failures = []      # ログインに失敗した時刻（続けて失敗したら少し待ってもらう）
+
+
+def load_accounts():
+    data = load_json(ACCOUNTS_FILE)
+    data.setdefault("accounts", {})
+    data.setdefault("registrations", {})
+    return data
+
+
+def secret_hash(value):
+    return hashlib.sha256(value.encode()).hexdigest()
+
+
+def new_challenge(kind, challenge, **extra):
+    now = time.monotonic()
+    with _auth_lock:
+        for key in [k for k, c in _challenges.items() if c["expires"] < now]:
+            del _challenges[key]
+        cid = secrets.token_urlsafe(16)
+        _challenges[cid] = {"kind": kind, "challenge": challenge, "expires": now + 300, **extra}
+    return cid
+
+
+def take_challenge(cid, kind):
+    with _auth_lock:
+        ch = _challenges.pop(cid, None) if isinstance(cid, str) else None
+    if not ch or ch["kind"] != kind or ch["expires"] < time.monotonic():
+        raise UploadError(400, "時間切れになりました。もう一度お試しください。")
+    return ch
+
+
+def check_account_id(value):
+    if not isinstance(value, str) or not MEMBER_ID_RE.match(value):
+        raise UploadError(400, "IDは半角英数字（50文字以内）で入力してください。")
+    return value
+
+
+def issue_registration(account_id):
+    """キーを登録するための、1回だけ使える URL を作る（24時間）"""
+    token = secrets.token_urlsafe(32)
+    with _forms_lock:
+        data = load_accounts()
+        if account_id not in data["accounts"]:
+            raise UploadError(404, "アカウントが見つかりません。")
+        now = datetime.now(JST)
+        data["registrations"] = {h: r for h, r in data["registrations"].items()
+                                 if datetime.fromisoformat(r["expires"]) > now and r["account"] != account_id}
+        data["registrations"][secret_hash(token)] = {
+            "account": account_id, "expires": (now + timedelta(hours=REGISTRATION_HOURS)).isoformat(timespec="seconds")}
+        save_json(ACCOUNTS_FILE, data)
+    return f"{ALLOWED_ORIGIN}/login/#register={token}"
+
+
+def find_registration(token):
+    if not isinstance(token, str) or not TOKEN_RE.match(token):
+        raise UploadError(403, "この登録用のURLは使えません。管理者に新しいURLを出してもらってください。")
+    data = load_accounts()
+    reg = data["registrations"].get(secret_hash(token))
+    if not reg or datetime.fromisoformat(reg["expires"]) < datetime.now(JST) or reg["account"] not in data["accounts"]:
+        raise UploadError(403, "この登録用のURLは使えません（期限切れか、使用済みです）。管理者に新しいURLを出してもらってください。")
+    return reg["account"], data["accounts"][reg["account"]]
+
+
+def all_credentials(data=None):
+    data = data or load_accounts()
+    return [(aid, c) for aid, a in data["accounts"].items() for c in a.get("credentials", [])]
+
+
+def handle_auth_register_options(body):
+    account_id, account = find_registration(body.get("token"))
+    options = webauthn.generate_registration_options(
+        rp_id=RP_ID, rp_name=RP_NAME, user_id=account_id.encode(), user_name=account_id,
+        user_display_name=account.get("name") or account_id,
+        exclude_credentials=[PublicKeyCredentialDescriptor(id=base64url_to_bytes(c["id"])) for _, c in all_credentials()],
+        authenticator_selection=AuthenticatorSelectionCriteria(
+            authenticator_attachment=AuthenticatorAttachment.CROSS_PLATFORM,
+            resident_key=ResidentKeyRequirement.DISCOURAGED,
+            user_verification=UserVerificationRequirement.REQUIRED),
+        attestation=AttestationConveyancePreference.NONE, timeout=120000)
+    cid = new_challenge("register", options.challenge, account=account_id)
+    return {"challengeId": cid, "options": json.loads(webauthn.options_to_json(options)),
+            "account": account_id, "name": account.get("name", "")}
+
+
+def handle_auth_register_verify(body):
+    token = body.get("token")
+    account_id, _ = find_registration(token)
+    ch = take_challenge(body.get("challengeId"), "register")
+    if ch["account"] != account_id:
+        raise UploadError(400, "時間切れになりました。もう一度お試しください。")
+    try:
+        verified = webauthn.verify_registration_response(
+            credential=body.get("credential"), expected_challenge=ch["challenge"], expected_rp_id=RP_ID,
+            expected_origin=ALLOWED_ORIGIN, require_user_verification=True)
+    except Exception as e:
+        log.warning("key registration rejected account=%s: %s", account_id, e)
+        raise UploadError(400, "キーを登録できませんでした。もう一度お試しください。")
+    label = text(body.get("label", ""), 30, "キーの名前") or "YubiKey"
+    with _forms_lock:
+        data = load_accounts()
+        account = data["accounts"].get(account_id)
+        if account is None or data["registrations"].pop(secret_hash(token), None) is None:
+            raise UploadError(403, "この登録用のURLは使えません。管理者に新しいURLを出してもらってください。")
+        account.setdefault("credentials", []).append({
+            "id": bytes_to_base64url(verified.credential_id),
+            "publicKey": bytes_to_base64url(verified.credential_public_key),
+            "signCount": verified.sign_count, "label": label,
+            "created": f"{datetime.now(JST):%Y-%m-%d %H:%M}"})
+        save_json(ACCOUNTS_FILE, data)
+    log.info("key registered account=%s", account_id)
+    return {"ok": True, "user": account_id, "_set_cookie": create_session(account_id)}
+
+
+def handle_auth_login_options(body):
+    creds = all_credentials()
+    if not creds:
+        raise UploadError(400, "まだキーが登録されていません。")
+    options = webauthn.generate_authentication_options(
+        rp_id=RP_ID, allow_credentials=[PublicKeyCredentialDescriptor(id=base64url_to_bytes(c["id"])) for _, c in creds],
+        user_verification=UserVerificationRequirement.REQUIRED, timeout=120000)
+    return {"challengeId": new_challenge("login", options.challenge),
+            "options": json.loads(webauthn.options_to_json(options))}
+
+
+def login_failed(reason):
+    now = time.monotonic()
+    with _auth_lock:
+        _login_failures[:] = [t for t in _login_failures if now - t < 600] + [now]
+    log.warning("login failed: %s", reason)
+    raise UploadError(401, "ログインできませんでした。登録したキーか確かめて、もう一度お試しください。")
+
+
+def handle_auth_login_verify(body):
+    with _auth_lock:
+        if len([t for t in _login_failures if time.monotonic() - t < 600]) >= 30:
+            raise UploadError(429, "ログインの失敗が続いたため、しばらくしてからお試しください。")
+    ch = take_challenge(body.get("challengeId"), "login")
+    credential = body.get("credential")
+    cred_id = credential.get("id") if isinstance(credential, dict) else None
+    match = next(((aid, c) for aid, c in all_credentials() if c["id"] == cred_id), None)
+    if not match:
+        login_failed("unknown key")
+    account_id, cred = match
+    try:
+        verified = webauthn.verify_authentication_response(
+            credential=credential, expected_challenge=ch["challenge"], expected_rp_id=RP_ID,
+            expected_origin=ALLOWED_ORIGIN, credential_public_key=base64url_to_bytes(cred["publicKey"]),
+            credential_current_sign_count=cred["signCount"], require_user_verification=True)
+    except Exception as e:
+        login_failed(f"account={account_id} {e}")
+    with _forms_lock:
+        data = load_accounts()
+        for c in data["accounts"].get(account_id, {}).get("credentials", []):
+            if c["id"] == cred_id:
+                c["signCount"] = verified.new_sign_count
+                c["lastUsed"] = f"{datetime.now(JST):%Y-%m-%d %H:%M}"
+        save_json(ACCOUNTS_FILE, data)
+    log.info("login account=%s", account_id)
+    return {"ok": True, "user": account_id, "_set_cookie": create_session(account_id)}
+
+
+def create_session(account_id):
+    token = secrets.token_urlsafe(32)
+    now = datetime.now(JST)
+    with _auth_lock:
+        sessions = {h: v for h, v in load_json(SESSIONS_FILE).items() if datetime.fromisoformat(v["expires"]) > now}
+        sessions[secret_hash(token)] = {"user": account_id,
+                                        "expires": (now + timedelta(hours=SESSION_HOURS)).isoformat(timespec="seconds")}
+        save_json(SESSIONS_FILE, sessions)
+    return f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age={SESSION_HOURS * 3600}"
+
+
+def session_token(cookie_header):
+    for part in (cookie_header or "").split(";"):
+        name, _, value = part.strip().partition("=")
+        if name == SESSION_COOKIE and TOKEN_RE.match(value):
+            return value
+    return None
+
+
+def session_user(cookie_header):
+    """ログインしている職員の ID（していなければ None）。消したアカウントのものは使えない"""
+    token = session_token(cookie_header)
+    if not token:
+        return None
+    entry = load_json(SESSIONS_FILE).get(secret_hash(token))
+    if not entry or datetime.fromisoformat(entry["expires"]) < datetime.now(JST):
+        return None
+    return entry["user"] if entry["user"] in load_accounts()["accounts"] else None
+
+
+def handle_auth_logout(body):
+    token = body.get("_session")
+    if token:
+        with _auth_lock:
+            sessions = load_json(SESSIONS_FILE)
+            sessions.pop(secret_hash(token), None)
+            save_json(SESSIONS_FILE, sessions)
+    return {"ok": True, "_set_cookie": f"{SESSION_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0"}
+
+
+def handle_auth_me(body):
+    user = body.get("_staff") or ""
+    account = load_accounts()["accounts"].get(user)
+    return {"user": user, "name": account.get("name", "") if account else "", "admin": is_admin(user),
+            "loggedIn": bool(body.get("_session_user"))}
+
+
+# --- 管理者（鍵まわりとアカウントの管理は管理者だけ） ---
+
+def admin_ids():
+    return [aid for aid, a in load_accounts()["accounts"].items() if a.get("admin")]
+
+
+def is_admin(user):
+    admins = admin_ids()
+    return (not admins) or user in admins
+
+
+def require_admin(body, strict=False):
+    """管理者だけができる操作。まだ管理者がいないうちは、strict でなければ誰でもできる（今までどおり）"""
+    admins = admin_ids()
+    if not admins and not strict:
+        return
+    if not admins:
+        raise UploadError(403, "最初の管理者は、サーバーで accounts_admin.py を使って作ってください。")
+    if body.get("_staff") not in admins:
+        raise UploadError(403, "この操作は管理者だけができます。")
+
+
+def account_view(aid, a):
+    return {"id": aid, "name": a.get("name", ""), "admin": bool(a.get("admin")),
+            "keys": [{"id": c["id"][:12], "label": c.get("label", ""), "created": c.get("created", ""),
+                      "lastUsed": c.get("lastUsed", "")} for c in a.get("credentials", [])]}
+
+
+def handle_accounts_list(body):
+    data = load_accounts()
+    return {"accounts": [account_view(aid, a) for aid, a in data["accounts"].items()], "me": body.get("_staff") or "",
+            "admin": is_admin(body.get("_staff"))}
+
+
+def handle_accounts_save(body):
+    """アカウントを作る・直す（管理者だけ）。管理者がいなくなる変更はできない"""
+    require_admin(body, strict=True)
+    aid = check_account_id(body.get("id"))
+    name = text(body.get("name", ""), 30, "表示名")
+    admin = body.get("admin") is True
+    with _forms_lock:
+        data = load_accounts()
+        account = data["accounts"].setdefault(aid, {"credentials": []})
+        account.update({"name": name, "admin": admin})
+        if not any(a.get("admin") for a in data["accounts"].values()):
+            raise UploadError(400, "管理者がいなくなるため、変更できません。")
+        save_json(ACCOUNTS_FILE, data)
+    return {"account": account_view(aid, account)}
+
+
+def handle_accounts_remove(body):
+    require_admin(body, strict=True)
+    aid = check_account_id(body.get("id"))
+    if aid == body.get("_staff"):
+        raise UploadError(400, "自分のアカウントは削除できません。")
+    with _forms_lock:
+        data = load_accounts()
+        if data["accounts"].pop(aid, None) is None:
+            raise UploadError(404, "アカウントが見つかりません。")
+        if not any(a.get("admin") for a in data["accounts"].values()):
+            raise UploadError(400, "管理者がいなくなるため、削除できません。")
+        data["registrations"] = {h: r for h, r in data["registrations"].items() if r["account"] != aid}
+        save_json(ACCOUNTS_FILE, data)
+    log.info("account removed id=%s by=%s", aid, body.get("_staff"))
+    return {"ok": True}
+
+
+def handle_accounts_issue(body):
+    """キーを登録するための URL（管理者は誰の分でも、ほかの職員は自分の分だけ。予備のキーを足すとき）"""
+    aid = check_account_id(body.get("id"))
+    if aid != body.get("_staff"):
+        require_admin(body, strict=True)
+    return {"url": issue_registration(aid)}
+
+
+def handle_accounts_key_remove(body):
+    """キーを消す（管理者だけ。なくしたキーなど）。keyId は一覧に出している先頭12文字"""
+    require_admin(body, strict=True)
+    aid = check_account_id(body.get("id"))
+    key_id = body.get("keyId")
+    if not isinstance(key_id, str) or len(key_id) < 12:
+        raise UploadError(404, "キーが見つかりません。")
+    with _forms_lock:
+        data = load_accounts()
+        account = data["accounts"].get(aid)
+        if account is None:
+            raise UploadError(404, "キーが見つかりません。")
+        before = len(account.get("credentials", []))
+        account["credentials"] = [c for c in account.get("credentials", []) if not c["id"].startswith(key_id)]
+        if len(account["credentials"]) == before:
+            raise UploadError(404, "キーが見つかりません。")
+        save_json(ACCOUNTS_FILE, data)
+    log.info("key removed account=%s by=%s", aid, body.get("_staff"))
+    return {"ok": True}
+
+
 # --- 職員の一覧（TODO の担当に使う。ID は秘密ではないので暗号化しない） ---
 
 def handle_members_list(body):
-    return {"members": load_json(MEMBERS_FILE).get("members", []), "me": body.get("_staff") or ""}
+    accounts = load_accounts()["accounts"]
+    if accounts:   # アカウントを作ったあとは、アカウントの一覧を職員の一覧とする
+        members = [{"id": aid, "name": a.get("name", "")} for aid, a in accounts.items()]
+    else:
+        members = load_json(MEMBERS_FILE).get("members", [])
+    return {"members": members, "me": body.get("_staff") or "", "fromAccounts": bool(accounts)}
 
 
 def handle_members_save(body):
+    if load_accounts()["accounts"]:
+        raise UploadError(400, "職員は「設定 → 職員のアカウント」で登録してください。")
     members = body.get("members")
     if not isinstance(members, list) or len(members) > 50:
         raise UploadError(400, "職員は50人までです。")
@@ -1346,7 +1679,8 @@ def handle_forms_remove(body):
 
 
 def handle_key_set(body):
-    """事務所の公開鍵を登録する。秘密鍵は職員のブラウザで作られ、ここには来ない"""
+    """事務所の公開鍵を登録する。秘密鍵は職員のブラウザで作られ、ここには来ない（管理者だけ）"""
+    require_admin(body)
     spki = check_b64(body.get("spki"), 2048)
     der = base64.b64decode(spki)
     if not 256 <= len(der) <= 1024:
@@ -1372,6 +1706,7 @@ def handle_unlocks_list(body):
 
 
 def handle_unlocks_add(body):
+    require_admin(body)
     cid = body.get("id")
     if not isinstance(cid, str) or not CREDENTIAL_ID_RE.match(cid):
         raise UploadError(400, "キーの情報が正しくありません。")
@@ -1403,6 +1738,7 @@ def handle_unlocks_add(body):
 
 
 def handle_unlocks_remove(body):
+    require_admin(body)
     cid = body.get("id")
     with _forms_lock:
         unlocks = load_json(UNLOCKS_FILE)
@@ -1671,6 +2007,15 @@ ROUTES = {
 }
 
 # 顧問先用とは別のポートで受ける。顧問先用の入口から管理の機能に届かないようにするため
+# ログインの前に使う（nginx の /api/auth/ から。ログインしていなくてもよい）
+AUTH_ROUTES = {
+    "/auth/register/options": handle_auth_register_options,
+    "/auth/register/verify": handle_auth_register_verify,
+    "/auth/login/options": handle_auth_login_options,
+    "/auth/login/verify": handle_auth_login_verify,
+    "/auth/logout": handle_auth_logout,
+}
+
 STAFF_ROUTES = {
     "/clients/list": handle_staff_list,
     "/clients/add": handle_staff_add,
@@ -1710,11 +2055,18 @@ STAFF_ROUTES = {
     "/unlocks/list": handle_unlocks_list,
     "/unlocks/add": handle_unlocks_add,
     "/unlocks/remove": handle_unlocks_remove,
+    "/me": handle_auth_me,
+    "/accounts/list": handle_accounts_list,
+    "/accounts/save": handle_accounts_save,
+    "/accounts/remove": handle_accounts_remove,
+    "/accounts/issue": handle_accounts_issue,
+    "/accounts/key-remove": handle_accounts_key_remove,
 }
 # 見るだけの API（変更の記録を残さない）
 STAFF_READ_ONLY = {"/clients/list", "/clients/qr", "/forms/list", "/requests/list", "/requests/qr",
                    "/submissions/list", "/office/get", "/unlocks/list", "/register/records", "/register/history",
-                   "/register/activities", "/activities/list", "/store/list", "/members/list", "/settings/get"}
+                   "/register/activities", "/activities/list", "/store/list", "/members/list", "/settings/get",
+                   "/me", "/accounts/list"}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1734,7 +2086,8 @@ class Handler(BaseHTTPRequestHandler):
             if isinstance(data, FileResponse):
                 self.send_file(data.response)
             else:
-                self.send_json(200, data)
+                cookie = data.pop("_set_cookie", None) if isinstance(data, dict) else None
+                self.send_json(200, data, cookie)
         except UploadError as e:
             self.send_json(e.status, {"error": e.message})
         except Exception:
@@ -1759,11 +2112,13 @@ class Handler(BaseHTTPRequestHandler):
             raise UploadError(400, "不正なリクエストです。")
         return body
 
-    def send_json(self, status, data):
+    def send_json(self, status, data, cookie=None):
         payload = json.dumps(data, ensure_ascii=False).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))
+        if cookie:
+            self.send_header("Set-Cookie", cookie)
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(payload)
@@ -1784,19 +2139,36 @@ class Handler(BaseHTTPRequestHandler):
 
 
 class StaffHandler(Handler):
-    routes = STAFF_ROUTES
+    routes = {**STAFF_ROUTES, **AUTH_ROUTES}
 
     def read_json(self):
         body = super().read_json()
-        # 事務所用の入力ページで、入力した職員を残すため（送られてきた値は使わない）
-        body["_staff"] = self.headers.get("X-Staff-User", "")
+        # 操作した職員：ログインしていればその職員（クッキー）。切り替えの前は nginx のベーシック認証の ID
+        # （送られてきた値は使わない）
+        user = session_user(self.headers.get("Cookie"))
+        body["_session_user"] = user or ""
+        body["_session"] = session_token(self.headers.get("Cookie")) or ""
+        body["_staff"] = user or self.headers.get("X-Staff-User", "")
         return body
+
+    def do_GET(self):
+        # nginx の auth_request から：ログインしていれば 200（X-Staff-User に職員の ID）、していなければ 401
+        if self.path != "/auth/check":
+            self.send_json(404, {"error": "見つかりません。"})
+            return
+        user = session_user(self.headers.get("Cookie"))
+        self.send_response(200 if user else 401)
+        if user:
+            self.send_header("X-Staff-User", user)
+        self.send_header("Content-Length", "0")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
 
     def after_route(self, body):
         # 誰が変更したか（入力内容を開いたか）を残す。ユーザー名は nginx のベーシック認証から
         if self.path not in STAFF_READ_ONLY:
             target = " ".join(f"{k}={body[k]}" for k in ("code", "id", "formId") if isinstance(body.get(k), str))
-            log.info("staff=%s %s %s", self.headers.get("X-Staff-User", "-"), self.path, target)
+            log.info("staff=%s %s %s", body.get("_staff") or "-", self.path, target)
 
 
 def main():

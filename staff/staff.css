@@ -35,6 +35,8 @@
 }
 
 .staff-header-right { display: flex; align-items: center; gap: 16px; }
+.staff-whoami { color: var(--navy); font-size: 0.9rem; font-weight: 700; }
+.staff-logout { padding: 4px 10px; background: #fff; border: 1px solid var(--navy); color: var(--navy); font-family: inherit; font-size: 0.85rem; cursor: pointer; }
 .staff-home-link { color: var(--navy); font-size: 0.9rem; }
 
 .staff-badge {

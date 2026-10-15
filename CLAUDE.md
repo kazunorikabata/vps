@@ -32,6 +32,7 @@
   - 入力ページごとに暗号化を外せるが、マイナンバーの項目があるものは外せない（サーバーでも確認）
   - 部品は横12マスのマス目に幅（`width`）で並べる（区切り線・説明文・空白・枠、行が決まった表・合計・列幅も）。表示は `form/render.js` と `form/layout.css` を顧問先の画面・PDF・事務所内ページで共通に使い、作成画面は `staff/form-editor.js`
   - VPS 上の配置：入力ページの定義 `forms.json`、URLの対応表 `form-requests.json`、公開鍵 `public-key.json`（いずれも `/var/lib/kabaoffice-upload/`）
+- 事務所内ページのログイン：職員ごとの YubiKey（WebAuthn、PIN 必須。`login/`・サーバーの `/auth/*`、部品は `webauthn`）。アカウントと登録したキー（公開鍵）は `/var/lib/kabaoffice-upload/staff-accounts.json`、ログイン中の印はクッキー（12時間）。アカウントの管理・鍵の作成・開け方の登録と削除は管理者だけ（サーバーで確かめる）。最初の管理者とキーを全部なくしたときは `sudo /opt/kabaoffice-upload/venv/bin/python /opt/kabaoffice-upload/accounts_admin.py admin|issue|list`。切り替えの前は nginx のベーシック認証も有効（第1段階）。テストは `webauthn` の入った環境で流す
 - 管理ページの Claude Code 会話一覧：`staff/claude.js`。dev の crontab で `app/claude_sessions.py` を毎分実行し、`/var/www/kabaoffice/staff/claude-sessions.json` に書き出す（会話の中身は書き出さず、日時と最初の依頼の冒頭だけ）。ブラウザから VPS のプログラムを起動する機能は作らない
 
 ## コマンド

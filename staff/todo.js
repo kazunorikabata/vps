@@ -204,6 +204,8 @@ async function loadMembers() {
   const data = await api('members/list');
   members = data.members;
   me = data.me;
+  // アカウントを作ったあとは、職員は「設定 → 職員のアカウント」で登録する
+  document.getElementById('members-card').hidden = data.fromAccounts;
   renderMembers();
 }
 

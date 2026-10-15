@@ -6,6 +6,7 @@ import base64
 import email
 import hashlib
 import http.client
+import io
 import json
 import re
 import os
@@ -315,6 +316,46 @@ class DriveRequestTest(unittest.TestCase):
         self.assertEqual(second["pageToken"], "next")
 
 
+class SoftKey:
+    """テスト用のソフトウェアのセキュリティキー（ES256）。登録とログインの応答を、本物と同じ形で作る"""
+
+    def __init__(self, origin=ORIGIN, rp_id="kabaoffice.com"):
+        from cryptography.hazmat.primitives.asymmetric import ec
+        self.key = ec.generate_private_key(ec.SECP256R1())
+        self.cred_id = os.urandom(32)
+        self.origin, self.rp_id, self.count = origin, rp_id, 0
+
+    @staticmethod
+    def b64(data):
+        return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+    def client_data(self, kind, challenge):
+        return json.dumps({"type": kind, "challenge": challenge, "origin": self.origin}).encode()
+
+    def register(self, options, uv=True):
+        import cbor2
+        nums = self.key.public_key().public_numbers()
+        cose = cbor2.dumps({1: 2, 3: -7, -1: 1, -2: nums.x.to_bytes(32, "big"), -3: nums.y.to_bytes(32, "big")})
+        auth = (hashlib.sha256(self.rp_id.encode()).digest() + bytes([0x41 | (0x04 if uv else 0)]) + (0).to_bytes(4, "big")
+                + bytes(16) + len(self.cred_id).to_bytes(2, "big") + self.cred_id + cose)
+        att = cbor2.dumps({"fmt": "none", "attStmt": {}, "authData": auth})
+        cd = self.client_data("webauthn.create", options["challenge"])
+        return {"id": self.b64(self.cred_id), "rawId": self.b64(self.cred_id), "type": "public-key",
+                "response": {"clientDataJSON": self.b64(cd), "attestationObject": self.b64(att)}}
+
+    def assert_(self, options, uv=True, tamper=False):
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.asymmetric import ec
+        self.count += 1
+        auth = hashlib.sha256(self.rp_id.encode()).digest() + bytes([0x01 | (0x04 if uv else 0)]) + self.count.to_bytes(4, "big")
+        cd = self.client_data("webauthn.get", options["challenge"])
+        sig = self.key.sign(auth + hashlib.sha256(cd).digest(), ec.ECDSA(hashes.SHA256()))
+        if tamper:
+            sig = sig[:-1] + bytes([sig[-1] ^ 1])
+        return {"id": self.b64(self.cred_id), "rawId": self.b64(self.cred_id), "type": "public-key",
+                "response": {"clientDataJSON": self.b64(cd), "authenticatorData": self.b64(auth), "signature": self.b64(sig)}}
+
+
 class FakeSheets:
     """Google スプレッドシートの代わり（シートごとの行の一覧）。API と同じく、行末の空のマスは返さない"""
 
@@ -360,7 +401,8 @@ class FormTest(unittest.TestCase):
         self.dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.dir.cleanup)
         for name in ("CLIENTS_FILE", "FORMS_FILE", "REQUESTS_FILE", "KEY_FILE", "OFFICE_FILE", "UNLOCKS_FILE",
-                     "RECORDS_FILE", "SHEETS_FILE", "REGISTERS_FILE", "MEMBERS_FILE", "SETTINGS_FILE"):
+                     "RECORDS_FILE", "SHEETS_FILE", "REGISTERS_FILE", "MEMBERS_FILE", "SETTINGS_FILE",
+                     "ACCOUNTS_FILE", "SESSIONS_FILE"):
             p = mock.patch.object(server, name, os.path.join(self.dir.name, name.lower()))
             p.start()
             self.addCleanup(p.stop)
@@ -1084,12 +1126,155 @@ class FormTest(unittest.TestCase):
 
     def test_members(self):
         status, data = self.staff_as("/members/list", {}, user="tanaka")
-        self.assertEqual(data, {"members": [], "me": "tanaka"})
+        self.assertEqual(data, {"members": [], "me": "tanaka", "fromAccounts": False})
         members = [{"id": "tanaka", "name": "田中"}, {"id": "sato", "name": ""}]
         self.assertEqual(self.staff_as("/members/save", {"members": members})[1], {"members": members})
         self.assertEqual(self.staff_as("/members/list", {})[1]["members"], members)
         for bad in ([{"id": "a b"}], [{"id": "x"}, {"id": "x"}], [{"id": ""}], "x"):
             self.assertEqual(self.staff_as("/members/save", {"members": bad})[0], 400, bad)
+
+    # --- 事務所内ページのログイン（YubiKey） ---
+
+    def call(self, path, body, cookie="", user=None, method="POST"):
+        """事務所内の入口に、クッキーと（切り替え前の）ベーシック認証の ID を付けて送る"""
+        conn = http.client.HTTPConnection("127.0.0.1", self.ports["staff"])
+        headers = {"Content-Type": "application/json", "Origin": ORIGIN}
+        if cookie:
+            headers["Cookie"] = cookie
+        if user:
+            headers["X-Staff-User"] = user
+        conn.request(method, path, json.dumps(body) if method == "POST" else None, headers)
+        res = conn.getresponse()
+        raw = res.read()
+        conn.close()
+        data = json.loads(raw) if raw else {}
+        set_cookie = res.getheader("Set-Cookie") or ""
+        return res.status, data, set_cookie.split(";")[0], dict(res.getheaders())
+
+    def make_admin(self, aid="kabata", name="蒲田"):
+        with open(server.ACCOUNTS_FILE, "w", encoding="utf-8") as f:
+            json.dump({"accounts": {aid: {"name": name, "admin": True, "credentials": []}}, "registrations": {}}, f)
+        return server.issue_registration(aid).split("#register=")[1]
+
+    def register_key(self, token, key=None):
+        key = key or SoftKey()
+        status, opts, _, _ = self.call("/auth/register/options", {"token": token})
+        self.assertEqual(status, 200, opts)
+        status, data, cookie, _ = self.call("/auth/register/verify", {
+            "token": token, "challengeId": opts["challengeId"], "credential": key.register(opts["options"]), "label": "1本目"})
+        self.assertEqual(status, 200, data)
+        return key, cookie
+
+    def login(self, key, **kw):
+        status, opts, _, _ = self.call("/auth/login/options", {})
+        self.assertEqual(status, 200, opts)
+        return self.call("/auth/login/verify", {"challengeId": opts["challengeId"], "credential": key.assert_(opts["options"], **kw)})
+
+    def test_key_registration_and_login(self):
+        token = self.make_admin()
+        key, cookie = self.register_key(token)
+        self.assertTrue(cookie.startswith("kaba_staff="))
+        # 登録用の URL は1回だけ
+        self.assertEqual(self.call("/auth/register/options", {"token": token})[0], 403)
+        status, data, _, _ = self.call("/me", {}, cookie)
+        self.assertEqual((data["user"], data["name"], data["admin"], data["loggedIn"]), ("kabata", "蒲田", True, True))
+        # nginx が確かめる入口
+        status, _, _, headers = self.call("/auth/check", {}, cookie, method="GET")
+        self.assertEqual((status, headers.get("X-Staff-User")), (200, "kabata"))
+        self.assertEqual(self.call("/auth/check", {}, method="GET")[0], 401)
+        self.assertEqual(self.call("/auth/check", {}, "kaba_staff=" + "x" * 43, method="GET")[0], 401)
+        # ログイン（署名の回数も残す）
+        status, data, cookie2, _ = self.login(key)
+        self.assertEqual((status, data["user"]), (200, "kabata"))
+        self.assertEqual(server.load_accounts()["accounts"]["kabata"]["credentials"][0]["signCount"], 1)
+        # ログアウトしたら使えない
+        self.assertEqual(self.call("/auth/logout", {}, cookie2)[0], 200)
+        self.assertEqual(self.call("/auth/check", {}, cookie2, method="GET")[0], 401)
+        self.assertEqual(self.call("/auth/check", {}, cookie, method="GET")[0], 200)   # ほかの端末のログインはそのまま
+
+    def test_login_rejects(self):
+        key, _ = self.register_key(self.make_admin())
+        with self.assertLogs("upload", "WARNING"):
+            self.assertEqual(self.login(key, tamper=True)[0], 401)      # 署名が合わない
+            self.assertEqual(self.login(key, uv=False)[0], 401)         # PIN を確かめていない
+            self.assertEqual(self.login(SoftKey())[0], 401)             # 登録していないキー
+            other = SoftKey(origin="https://evil.example")
+            other.key, other.cred_id = key.key, key.cred_id
+            self.assertEqual(self.login(other)[0], 401)                 # 別のサイトから
+        # 確認用の値は1回だけ
+        status, opts, _, _ = self.call("/auth/login/options", {})
+        body = {"challengeId": opts["challengeId"], "credential": key.assert_(opts["options"])}
+        self.assertEqual(self.call("/auth/login/verify", body)[0], 200)
+        self.assertEqual(self.call("/auth/login/verify", body)[0], 400)
+        # 消したアカウントのログインは使えない
+        status, _, cookie, _ = self.login(key)
+        data = server.load_accounts()
+        data["accounts"] = {"other": {"name": "", "admin": True, "credentials": []}}
+        server.save_json(server.ACCOUNTS_FILE, data)
+        self.assertEqual(self.call("/auth/check", {}, cookie, method="GET")[0], 401)
+
+    def test_registration_rejects(self):
+        token = self.make_admin()
+        status, opts, _, _ = self.call("/auth/register/options", {"token": token})
+        bad = SoftKey().register(opts["options"], uv=False)
+        with self.assertLogs("upload", "WARNING"):
+            self.assertEqual(self.call("/auth/register/verify", {"token": token, "challengeId": opts["challengeId"], "credential": bad})[0], 400)
+        self.assertEqual(self.call("/auth/register/options", {"token": "x" * 43})[0], 403)
+        # 期限切れ
+        data = server.load_accounts()
+        for reg in data["registrations"].values():
+            reg["expires"] = "2020-01-01T00:00:00+09:00"
+        server.save_json(server.ACCOUNTS_FILE, data)
+        self.assertEqual(self.call("/auth/register/options", {"token": token})[0], 403)
+
+    def test_accounts_cli(self):
+        import accounts_admin
+        out = io.StringIO()
+        with mock.patch("sys.stdout", out):
+            accounts_admin.main(["admin", "kabata", "蒲田"])
+        token = out.getvalue().strip().split("#register=")[1]
+        self.assertTrue(out.getvalue().startswith(server.ALLOWED_ORIGIN + "/login/#register="))
+        self.register_key(token)
+        out = io.StringIO()
+        with mock.patch("sys.stdout", out):
+            accounts_admin.main(["list"])
+        self.assertEqual(out.getvalue().split(), ["kabata", "蒲田", "管理者", "キー1本"])
+        with self.assertRaises(SystemExit):
+            accounts_admin.main(["admin", "a b", "x"])
+
+    def test_admin_only_operations(self):
+        self.set_key()
+        # 管理者がいないうちは、鍵まわりは今までどおり誰でもできる。アカウントの管理はできない
+        self.assertEqual(self.call("/unlocks/remove", {"id": "credentialId_0123456789"}, user="sato")[0], 404)
+        self.assertEqual(self.call("/accounts/save", {"id": "sato", "name": "佐藤"}, user="sato")[0], 403)
+        key, cookie = self.register_key(self.make_admin())
+        # 管理者ができてからは、ほかの職員は鍵まわりを触れない（切り替え前のベーシック認証の ID でも同じ）
+        for path, body in (("/unlocks/remove", {"id": "credentialId_0123456789"}), ("/key/set", {"spki": self.SPKI, "replace": True}),
+                           ("/unlocks/add", {}), ("/accounts/save", {"id": "x", "name": "x"}), ("/accounts/issue", {"id": "kabata"})):
+            self.assertEqual(self.call(path, body, user="sato")[0], 403, path)
+        # 管理者は職員を作り、登録用の URL を出せる
+        self.assertEqual(self.call("/accounts/save", {"id": "sato", "name": "佐藤"}, cookie)[0], 200)
+        status, data, _, _ = self.call("/accounts/issue", {"id": "sato"}, cookie)
+        sato_key, sato_cookie = self.register_key(data["url"].split("#register=")[1])
+        status, data, _, _ = self.call("/accounts/list", {}, sato_cookie)
+        self.assertEqual((data["me"], data["admin"], [a["id"] for a in data["accounts"]]), ("sato", False, ["kabata", "sato"]))
+        self.assertEqual(self.call("/accounts/issue", {"id": "sato"}, sato_cookie)[0], 200)    # 自分の予備のキーは足せる
+        self.assertEqual(self.call("/accounts/remove", {"id": "kabata"}, sato_cookie)[0], 403)
+        # 職員の一覧はアカウントから。前の形では直せない
+        self.assertEqual(self.call("/members/list", {}, sato_cookie)[1]["members"], [{"id": "kabata", "name": "蒲田"}, {"id": "sato", "name": "佐藤"}])
+        self.assertEqual(self.call("/members/save", {"members": []}, cookie)[0], 400)
+        # 管理者がいなくなる変更・自分の削除はできない
+        self.assertEqual(self.call("/accounts/save", {"id": "kabata", "name": "蒲田", "admin": False}, cookie)[0], 400)
+        self.assertEqual(self.call("/accounts/remove", {"id": "kabata"}, cookie)[0], 400)
+        # キーを消すと、そのキーではログインできない
+        key_id = [a for a in data["accounts"] if a["id"] == "sato"][0]["keys"][0]["id"]
+        self.assertEqual(self.call("/accounts/key-remove", {"id": "sato", "keyId": key_id}, cookie)[0], 200)
+        with self.assertLogs("upload", "WARNING"):
+            self.assertEqual(self.login(sato_key)[0], 401)
+        self.assertEqual(self.call("/accounts/remove", {"id": "sato"}, cookie)[0], 200)
+        self.assertEqual(self.call("/auth/check", {}, sato_cookie, method="GET")[0], 401)
+        # 顧問先用の入口からは使えない
+        self.assertEqual(self.post("/auth/login/options", {})[0], 404)
 
     # --- 顧問先の入力ページ ---
 

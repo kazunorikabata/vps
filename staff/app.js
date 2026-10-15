@@ -11,6 +11,7 @@ const ROUTES = {
   office: { view: 'forms', kind: 'office' },
   site: { view: 'site', title: 'サイトの修正' },
   keys: { view: 'keys', title: '暗号化の鍵' },
+  accounts: { view: 'accounts', title: '職員のアカウント' },
 };
 
 function route() {
@@ -28,6 +29,7 @@ function route() {
   message.hidden = true;
   if (r.kind) setKind(r.kind, arg ? decodeURIComponent(arg) : undefined);
   if (key === 'todo') run(startTodo);
+  if (key === 'accounts') run(loadAccounts);
   if (key === 'deadline') run(startDeadline);
   window.scrollTo({ top: 0 });
 }
@@ -50,7 +52,7 @@ window.addEventListener('hashchange', route);
 // 一覧などを順に読み込んでから、最初の画面を出す（同時に動かすと、ボタンの使える・使えないが乱れるため）。
 // どれかが読み込めなくても、ほかは使えるようにする
 document.addEventListener('DOMContentLoaded', () => run(async () => {
-  for (const load of [loadClients, loadForms, loadUnlocks]) {
+  for (const load of [loadMe, loadClients, loadForms, loadUnlocks]) {
     try {
       await load();
     } catch (err) {

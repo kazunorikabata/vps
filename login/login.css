@@ -1,0 +1,25 @@
+[hidden] { display: none !important; }
+
+.login { max-width: 560px; }
+.login-card { padding: 24px 20px; background: #fff; border: 1px solid var(--line); }
+.login-card p { margin: 0 0 16px; }
+.login-message { margin: 0 0 20px; padding: 12px 16px; background: #fff; border: 1px solid var(--line); }
+.login-message.is-ok { border-color: #2e6b3a; color: #2e6b3a; }
+.login-message.is-error { border-color: #b3261e; color: #b3261e; }
+.login-label { display: flex; flex-direction: column; gap: 4px; margin: 0 0 16px; font-weight: 700; }
+.login-label input { padding: 10px 12px; border: 1px solid var(--line); font-family: inherit; font-size: 1rem; }
+.login-button {
+  display: block;
+  width: 100%;
+  padding: 14px;
+  background: var(--navy);
+  border: 0;
+  color: #fff;
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: 700;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+.login-button:disabled { background: #9aa5b4; cursor: progress; }

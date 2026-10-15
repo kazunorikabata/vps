@@ -11,9 +11,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&family=Noto+Serif+JP:wght@500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
-  <link rel="stylesheet" href="/staff/staff.css?v=20261014-2">
-  <link rel="stylesheet" href="/form/layout.css?v=20261014-2">
-  <link rel="stylesheet" href="/staff/forms.css?v=20261014-2">
+  <link rel="stylesheet" href="/staff/staff.css?v=20261014-3">
+  <link rel="stylesheet" href="/form/layout.css?v=20261014-3">
+  <link rel="stylesheet" href="/staff/forms.css?v=20261014-3">
 </head>
 <body>
   <!-- 事務所内ページは、この1つのページで画面を切り替える（app.js）。鍵はこのページの中だけに置くので、
@@ -22,6 +22,8 @@
     <div class="container header-inner">
       <a href="/staff/" class="logo">蒲田和紀税理士事務所</a>
       <div class="staff-header-right">
+        <span id="whoami" class="staff-whoami" hidden></span>
+        <button type="button" id="logout" class="staff-logout" hidden>ログアウト</button>
         <a href="/" class="staff-home-link">ホームページへ</a>
         <span class="staff-badge">事務所内</span>
       </div>
@@ -45,6 +47,7 @@
         <a href="#site" data-nav="site">Claude Code の会話</a>
         <p class="staff-sidebar-group">設定</p>
         <a href="#keys" data-nav="keys">暗号化の鍵</a>
+        <a href="#accounts" data-nav="accounts">職員のアカウント</a>
       </nav>
 
     <div class="staff staff-wide">
@@ -400,7 +403,7 @@
           </div>
         </section>
 
-        <section class="staff-card">
+        <section id="members-card" class="staff-card">
           <h2>職員の一覧（TODO の担当）</h2>
           <p class="hint">事務所内ページにログインするIDと、表示する名前を登録します。IDは暗号化しません。</p>
           <ul id="members-list" class="register-history"></ul>
@@ -505,6 +508,35 @@
         </section>
       </div>
 
+      <div class="view" data-view="accounts" hidden>
+        <h1 class="section-title">職員のアカウント</h1>
+        <section class="staff-card">
+          <h2>アカウントと YubiKey</h2>
+          <p class="hint">事務所内ページには、職員ごとの YubiKey でログインします。管理者がアカウントを作り、「登録用のURL」を職員に渡します。職員はそのURLを開いて、自分の YubiKey を登録します（URLは24時間・1回だけ使えます）。管理者は、鍵の作成・開け方の登録や削除、アカウントの管理ができます。</p>
+          <div class="table-wrap">
+            <table class="clients-table">
+              <thead><tr><th>ID</th><th>表示名</th><th>管理者</th><th>YubiKey</th><th>操作</th></tr></thead>
+              <tbody id="accounts-list"></tbody>
+            </table>
+          </div>
+          <p id="accounts-empty" class="hint" hidden>まだアカウントがありません。最初の管理者は、サーバーでコマンド（accounts_admin.py）を使って作ります。</p>
+          <div id="accounts-url" class="unlock-steps" hidden>
+            <p id="accounts-url-title"></p>
+            <div class="url-row"><input id="accounts-url-input" readonly aria-label="登録用のURL"><button type="button" id="accounts-url-copy" class="button">コピー</button></div>
+            <p class="hint">このURLを知っている人は、そのアカウントにキーを登録できます。本人にだけ、直接（対面や社内のチャットで）渡してください。</p>
+          </div>
+          <form id="accounts-add" class="add-form admin-only">
+            <label for="account-id">ID</label>
+            <input id="account-id" maxlength="50" required placeholder="例：tanaka" autocomplete="off">
+            <label for="account-name">表示名</label>
+            <input id="account-name" maxlength="30" placeholder="例：田中" autocomplete="off">
+            <label class="check-line"><input type="checkbox" id="account-admin"> 管理者</label>
+            <button type="submit" class="button button-small">アカウントを作る</button>
+          </form>
+          <button type="button" id="accounts-self-key" class="button button-outline">自分の予備のキーを登録する</button>
+        </section>
+      </div>
+
       <div class="view" data-view="site" hidden>
         <h1 class="section-title">サイトの修正</h1>
       <section class="staff-card">
@@ -529,19 +561,20 @@
     </div>
   </footer>
 
-  <script src="/form/crypto.js?v=20261014-2"></script>
-  <script src="/form/render.js?v=20261014-2"></script>
-  <script src="/form/values.js?v=20261014-2"></script>
-  <script src="/staff/common.js?v=20261014-2"></script>
-  <script src="/staff/staff.js?v=20261014-2"></script>
-  <script src="/staff/forms.js?v=20261014-2"></script>
-  <script src="/staff/form-editor.js?v=20261014-2"></script>
-  <script src="/staff/unlock.js?v=20261014-2"></script>
-  <script src="/staff/register.js?v=20261014-2"></script>
-  <script src="/staff/activities.js?v=20261014-2"></script>
-  <script src="/staff/todo.js?v=20261014-2"></script>
-  <script src="/staff/deadline.js?v=20261014-2"></script>
-  <script src="/staff/claude.js?v=20261014-2"></script>
-  <script src="/staff/app.js?v=20261014-2"></script>
+  <script src="/form/crypto.js?v=20261014-3"></script>
+  <script src="/form/render.js?v=20261014-3"></script>
+  <script src="/form/values.js?v=20261014-3"></script>
+  <script src="/staff/common.js?v=20261014-3"></script>
+  <script src="/staff/staff.js?v=20261014-3"></script>
+  <script src="/staff/forms.js?v=20261014-3"></script>
+  <script src="/staff/form-editor.js?v=20261014-3"></script>
+  <script src="/staff/unlock.js?v=20261014-3"></script>
+  <script src="/staff/register.js?v=20261014-3"></script>
+  <script src="/staff/activities.js?v=20261014-3"></script>
+  <script src="/staff/todo.js?v=20261014-3"></script>
+  <script src="/staff/deadline.js?v=20261014-3"></script>
+  <script src="/staff/claude.js?v=20261014-3"></script>
+  <script src="/staff/accounts.js?v=20261014-3"></script>
+  <script src="/staff/app.js?v=20261014-3"></script>
 </body>
 </html>

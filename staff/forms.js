@@ -142,7 +142,7 @@ function showKey() {
   document.getElementById('key-create-show').classList.toggle('button-danger', Boolean(registeredKey));
   document.getElementById('key-replace-warning').hidden = !registeredKey;
   // 作り直すと今までの入力内容が新しい鍵では開けなくなるので、鍵を開いているときだけ出す（最初の1回は「鍵を作る」を出す）
-  const canRecreate = !registeredKey || Boolean(loadedKey);
+  const canRecreate = (!registeredKey || Boolean(loadedKey)) && currentUser.admin;
   document.getElementById('key-create-show').hidden = !canRecreate;
   document.getElementById('key-create-locked').hidden = canRecreate;
   if (!canRecreate) document.getElementById('key-create').hidden = true;
